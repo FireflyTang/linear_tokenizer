@@ -33,7 +33,7 @@ _DELAY = 0.5   # seconds between requests (be a good citizen)
 
 # Wikipedia articles: (title_for_API, lang, category_label)
 _WIKI_ARTICLES = [
-    # English — tech/AI topics that produce long, clean plain text
+    # English — tech/AI topics
     ("Transformer_(deep_learning_architecture)", "en", "pure_english"),
     ("Large_language_model",                     "en", "pure_english"),
     ("Attention_(machine_learning)",             "en", "pure_english"),
@@ -42,7 +42,9 @@ _WIKI_ARTICLES = [
     ("Python_(programming_language)",            "en", "pure_english"),
     ("Reinforcement_learning",                   "en", "pure_english"),
     ("Recurrent_neural_network",                 "en", "pure_english"),
-    # Chinese Wikipedia — same topics
+    ("Byte_pair_encoding",                       "en", "pure_english"),
+    ("Tokenization_(lexical_analysis)",          "en", "pure_english"),
+    # Chinese Wikipedia
     ("大型语言模型",   "zh", "pure_chinese"),
     ("人工智能",       "zh", "pure_chinese"),
     ("深度学习",       "zh", "pure_chinese"),
@@ -50,28 +52,44 @@ _WIKI_ARTICLES = [
     ("卷积神经网络",   "zh", "pure_chinese"),
     ("强化学习",       "zh", "pure_chinese"),
     ("生成对抗网络",   "zh", "pure_chinese"),
+    ("变换器模型",     "zh", "pure_chinese"),
+    ("Python",         "zh", "pure_chinese"),
 ]
 
 # GitHub raw files: (owner, repo, branch, path, category)
 _GITHUB_FILES = [
-    # CPython stdlib — large, well-commented Python
+    # CPython stdlib
     ("python", "cpython", "main", "Lib/ast.py",            "code_py"),
     ("python", "cpython", "main", "Lib/json/__init__.py",  "code_py"),
     ("python", "cpython", "main", "Lib/pathlib/_local.py", "code_py"),
     ("python", "cpython", "main", "Lib/typing.py",         "code_py"),
     ("python", "cpython", "main", "Lib/dataclasses.py",    "code_py"),
     # Popular Python libraries
-    ("psf",      "requests", "main",   "src/requests/models.py",    "code_py"),
-    ("psf",      "requests", "main",   "src/requests/adapters.py",  "code_py"),
-    ("pallets",  "flask",    "main",   "src/flask/app.py",          "code_py"),
-    ("tiangolo", "fastapi",  "master", "fastapi/routing.py",        "code_py"),
+    ("psf",      "requests", "main",   "src/requests/models.py",   "code_py"),
+    ("psf",      "requests", "main",   "src/requests/adapters.py", "code_py"),
+    ("pallets",  "flask",    "main",   "src/flask/app.py",         "code_py"),
+    ("tiangolo", "fastapi",  "master", "fastapi/routing.py",       "code_py"),
+    ("tiangolo", "fastapi",  "master", "fastapi/applications.py",  "code_py"),
     # JavaScript / TypeScript
-    ("expressjs", "express", "master",  "lib/application.js",       "code_js"),
-    ("axios",     "axios",   "v1.x",    "lib/core/Axios.js",        "code_js"),
-    ("vercel",    "next.js", "canary",  "packages/next/src/server/app-router/app-router.ts", "code_js"),
-    # Shell / DevOps scripts
-    ("nvm-sh", "nvm", "master", "install.sh",                       "code_shell"),
-    ("ohmyzsh", "ohmyzsh", "master", "tools/install.sh",            "code_shell"),
+    ("expressjs", "express", "master", "lib/application.js",        "code_js"),
+    ("expressjs", "express", "master", "lib/router/index.js",       "code_js"),
+    ("axios",     "axios",   "v1.x",   "lib/core/Axios.js",         "code_js"),
+    ("axios",     "axios",   "v1.x",   "lib/adapters/http.js",      "code_js"),
+    # Go — standard library (dense comments + complex logic)
+    ("golang", "go", "master", "src/encoding/json/encode.go",   "code_go"),
+    ("golang", "go", "master", "src/net/http/server.go",         "code_go"),
+    ("golang", "go", "master", "src/sync/map.go",                "code_go"),
+    # Rust — standard library
+    ("rust-lang", "rust", "master", "library/std/src/collections/hash/map.rs", "code_rust"),
+    ("rust-lang", "rust", "master", "library/core/src/iter/traits/iterator.rs","code_rust"),
+    # Shell / DevOps
+    ("nvm-sh",   "nvm",    "master", "install.sh",          "code_shell"),
+    ("ohmyzsh",  "ohmyzsh","master", "tools/install.sh",    "code_shell"),
+    # Chinese code with Chinese comments (PaddleNLP — well-commented Chinese ML code)
+    ("PaddlePaddle", "PaddleNLP", "develop",
+     "paddlenlp/transformers/tokenizer_utils.py", "mixed"),
+    ("PaddlePaddle", "PaddleNLP", "develop",
+     "paddlenlp/transformers/auto/tokenization.py", "mixed"),
 ]
 
 

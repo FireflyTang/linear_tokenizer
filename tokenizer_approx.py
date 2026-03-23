@@ -1,25 +1,21 @@
 """
-Linear token count approximation — 5-feature model.
+Linear token count approximation — 6-feature model.
 
-Decomposes every character into one of five mutually-exclusive buckets and
-applies a separate tokens-per-character coefficient to each:
-
+Five character-class features (exhaustive, mutually exclusive):
   cjk    – CJK ideographs + CJK punctuation + fullwidth forms
   letter – ASCII letters  [A-Za-z]
   digit  – Decimal digits [0-9]
   punct  – Everything else: ASCII symbols, other Unicode (emoji, Cyrillic…)
   space  – Whitespace     [ \\t\\n\\r…]
 
-The five buckets are exhaustive: cjk + letter + digit + punct + space == len(text).
+Plus one word-level feature:
+  word   – whitespace-split word count (captures BPE word-boundary behaviour;
+           particularly useful for English prose where word count correlates
+           more tightly with token count than letter-char count alone)
 
-Why 5 features beat the old 2-feature model:
-  • digits tokenise at ~2 chars/token (0.50), not 4 (0.25) — biggest win for numeric text
-  • punctuation tokenises at ~1 char/token (0.90), not 4 — fixes code and symbol-heavy text
-  • spaces are nearly free in BPE (merged into adjacent words) — fixes indented code over-estimate
-  • letters stay close to 0.25–0.27 but are no longer contaminated by digits/punct
-
-Default coefficients are reasonable starting points; run benchmark.py --fit to get
-model-specific values via least-squares.
+Default coefficients are fitted via NNLS on 261 real k-length samples
+(Wikipedia + GitHub) across GLM-5, Kimi-K2.5, DeepSeek-V3.2, MiniMax-M2.5.
+Run benchmark.py --real-data --fit-shared to refit.
 """
 
 import re
@@ -45,12 +41,13 @@ _SPACE_RE   = re.compile(r"\s")
 
 # ── Coefficient container ──────────────────────────────────────────────────────
 class Coeffs(NamedTuple):
-    """Tokens-per-character for each feature bucket."""
-    cjk:    float = 1.00   # CJK chars:  ~1 token/char
-    letter: float = 0.27   # ASCII letters: ~3.7 chars/token
-    digit:  float = 0.50   # Digits:      ~2 chars/token
-    punct:  float = 0.90   # Symbols/punct: ~1.1 chars/token
-    space:  float = 0.08   # Whitespace: mostly merged in BPE
+    """Tokens-per-unit for each feature. char features: tokens/char; word: tokens/word."""
+    cjk:    float = 0.6330   # CJK chars
+    letter: float = 0.1406   # ASCII letter chars
+    digit:  float = 0.7876   # digit chars
+    punct:  float = 0.7115   # other chars (punct/symbols)
+    space:  float = 0.0995   # whitespace chars
+    word:   float = 0.3633   # whitespace-split words
 
 DEFAULT_COEFFS = Coeffs()
 
@@ -62,20 +59,24 @@ EN_TPC: float = DEFAULT_COEFFS.letter
 # ── Feature extraction ────────────────────────────────────────────────────────
 def extract_features(text: str) -> dict[str, int]:
     """
-    Return a dict with five mutually-exclusive character counts.
-    The counts sum to len(text).
+    Return a dict with six features.
+
+    The first five (cjk/letter/digit/punct/space) are mutually exclusive
+    char counts that sum to len(text).  'word' is an independent word count.
     """
     cjk    = len(_CJK_RE.findall(text))
     letter = len(_LETTER_RE.findall(text))
     digit  = len(_DIGIT_RE.findall(text))
     space  = len(_SPACE_RE.findall(text))
     punct  = len(text) - cjk - letter - digit - space
+    word   = len(text.split())
     return {
         "cjk":    cjk,
         "letter": letter,
         "digit":  digit,
         "punct":  punct,
         "space":  space,
+        "word":   word,
     }
 
 
@@ -91,11 +92,12 @@ def estimate(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
         return 0
     f = extract_features(text)
     total = (
-        f["cjk"]    * coeffs.cjk  +
+        f["cjk"]    * coeffs.cjk    +
         f["letter"] * coeffs.letter +
-        f["digit"]  * coeffs.digit +
-        f["punct"]  * coeffs.punct +
-        f["space"]  * coeffs.space
+        f["digit"]  * coeffs.digit  +
+        f["punct"]  * coeffs.punct  +
+        f["space"]  * coeffs.space  +
+        f["word"]   * coeffs.word
     )
     return max(1, round(total))
 
@@ -116,16 +118,19 @@ def estimate_detail(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> dict:
     digit_t  = f["digit"]  * coeffs.digit
     punct_t  = f["punct"]  * coeffs.punct
     space_t  = f["space"]  * coeffs.space
+    word_t   = f["word"]   * coeffs.word
     return {
-        "total":         max(1, round(cjk_t + letter_t + digit_t + punct_t + space_t)),
+        "total":         max(1, round(cjk_t + letter_t + digit_t + punct_t + space_t + word_t)),
         "cjk_chars":     f["cjk"],
         "letter_chars":  f["letter"],
         "digit_chars":   f["digit"],
         "punct_chars":   f["punct"],
         "space_chars":   f["space"],
+        "word_count":    f["word"],
         "cjk_tokens":    cjk_t,
         "letter_tokens": letter_t,
         "digit_tokens":  digit_t,
         "punct_tokens":  punct_t,
         "space_tokens":  space_t,
+        "word_tokens":   word_t,
     }

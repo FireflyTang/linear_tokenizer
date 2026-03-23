@@ -70,14 +70,15 @@ def _stats(errors, pcts):
 # ── Coefficient fitting ───────────────────────────────────────────────────────
 
 def _build_matrix(samples, counter_fn):
-    """Return (A, b) design matrix for one model."""
+    """Return (A, b) design matrix for one model — 6 features."""
     A_rows, b_rows = [], []
     for s in samples:
         f = extract_features(s["text"])
         real = counter_fn(s["text"])
         if real <= 0:
             continue
-        A_rows.append([f["cjk"], f["letter"], f["digit"], f["punct"], f["space"]])
+        A_rows.append([f["cjk"], f["letter"], f["digit"],
+                        f["punct"], f["space"], f["word"]])
         b_rows.append(real)
     return np.array(A_rows, dtype=float), np.array(b_rows, dtype=float)
 
@@ -92,7 +93,7 @@ def fit_per_model(samples, counters) -> dict[str, Coeffs]:
             continue
         coef, _ = nnls(A, b)
         result[name] = Coeffs(cjk=coef[0], letter=coef[1], digit=coef[2],
-                              punct=coef[3], space=coef[4])
+                              punct=coef[3], space=coef[4], word=coef[5])
     return result
 
 
@@ -113,13 +114,13 @@ def fit_shared(samples, counters) -> Coeffs:
         b_all.append(b)
     A_stacked = np.vstack(A_all)
     b_stacked  = np.concatenate(b_all)
-    coef, residual = nnls(A_stacked, b_stacked)
+    coef, _ = nnls(A_stacked, b_stacked)
     return Coeffs(cjk=coef[0], letter=coef[1], digit=coef[2],
-                  punct=coef[3], space=coef[4])
+                  punct=coef[3], space=coef[4], word=coef[5])
 
 
-def _eval_coeffs(samples, fn, coeffs: Coeffs) -> tuple[float, float]:
-    """Return (MAE, MAPE) when using given coeffs for one model."""
+def _eval_coeffs(samples, fn, coeffs: Coeffs) -> tuple[float, float, float]:
+    """Return (MAE, MAPE, max_abs_pct) when using given coeffs for one model."""
     errs, pcts = [], []
     for s in samples:
         real = fn(s["text"])
@@ -130,25 +131,26 @@ def _eval_coeffs(samples, fn, coeffs: Coeffs) -> tuple[float, float]:
         errs.append(err)
         pcts.append(err / real * 100)
     if not errs:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
     return (sum(abs(e) for e in errs) / len(errs),
-            sum(abs(p) for p in pcts) / len(pcts))
+            sum(abs(p) for p in pcts) / len(pcts),
+            max(abs(p) for p in pcts))
 
 
 def _print_coeffs_table(label: str, coeffs_map: dict[str, Coeffs],
                          samples, counters):
     """Pretty-print a table of fitted coefficients + their errors."""
     hdr = (f"  {'Model':<12}  {'cjk':>7}  {'letter':>7}  {'digit':>7}  "
-           f"{'punct':>7}  {'space':>7}  {'MAE':>8}  {'MAPE':>7}")
+           f"{'punct':>7}  {'space':>7}  {'word':>7}  {'MAPE':>7}  {'MaxErr':>8}")
     print(f"\n── {label} ──")
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
     for name, c in coeffs_map.items():
         fn = counters[name]
-        mae, mape = _eval_coeffs(samples, fn, c)
+        mae, mape, max_pct = _eval_coeffs(samples, fn, c)
         print(f"  {MODEL_LABELS[name]:<12}  {c.cjk:>7.4f}  {c.letter:>7.4f}  "
-              f"{c.digit:>7.4f}  {c.punct:>7.4f}  {c.space:>7.4f}  "
-              f"{mae:>8.2f}  {mape:>6.1f}%")
+              f"{c.digit:>7.4f}  {c.punct:>7.4f}  {c.space:>7.4f}  {c.word:>7.4f}  "
+              f"{mape:>6.1f}%  {max_pct:>7.1f}%")
 
 
 def _print_shared_table(label: str, shared: Coeffs, samples, counters):
@@ -157,7 +159,7 @@ def _print_shared_table(label: str, shared: Coeffs, samples, counters):
     print(f"\n── {label} ──")
     print(f"  Coeffs(cjk={c.cjk:.4f}, letter={c.letter:.4f}, digit={c.digit:.4f}, "
           f"punct={c.punct:.4f}, space={c.space:.4f})")
-    hdr = f"  {'Model':<12}  {'MAE':>8}  {'MAPE':>7}  {'bias':>8}"
+    hdr = f"  {'Model':<12}  {'MAPE':>7}  {'MaxErr':>8}  {'bias%':>7}"
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
     all_errs, all_pcts = [], []
@@ -173,17 +175,17 @@ def _print_shared_table(label: str, shared: Coeffs, samples, counters):
             pcts.append(e / real * 100)
         if not errs:
             continue
-        mae  = sum(abs(e) for e in errs) / len(errs)
-        mape = sum(abs(p) for p in pcts) / len(pcts)
-        bias = sum(errs) / len(errs)
-        print(f"  {MODEL_LABELS[name]:<12}  {mae:>8.2f}  {mape:>6.1f}%  {bias:>+8.2f}")
+        mape    = sum(abs(p) for p in pcts) / len(pcts)
+        max_pct = max(abs(p) for p in pcts)
+        bias    = sum(pcts) / len(pcts)
+        print(f"  {MODEL_LABELS[name]:<12}  {mape:>6.1f}%  {max_pct:>7.1f}%  {bias:>+6.1f}%")
         all_errs.extend(errs)
         all_pcts.extend(pcts)
-    if all_errs:
-        mae  = sum(abs(e) for e in all_errs) / len(all_errs)
-        mape = sum(abs(p) for p in all_pcts) / len(all_pcts)
-        bias = sum(all_errs) / len(all_errs)
-        print(f"  {'ALL MODELS':<12}  {mae:>8.2f}  {mape:>6.1f}%  {bias:>+8.2f}")
+    if all_pcts:
+        mape    = sum(abs(p) for p in all_pcts) / len(all_pcts)
+        max_pct = max(abs(p) for p in all_pcts)
+        bias    = sum(all_pcts) / len(all_pcts)
+        print(f"  {'ALL MODELS':<12}  {mape:>6.1f}%  {max_pct:>7.1f}%  {bias:>+6.1f}%")
 
 
 # ── Main benchmark loop ───────────────────────────────────────────────────────
@@ -291,7 +293,7 @@ def run_benchmark(
         c = shared
         print(f"\n  Paste into tokenizer_approx.py DEFAULT_COEFFS:\n"
               f"  DEFAULT_COEFFS = Coeffs(cjk={c.cjk:.4f}, letter={c.letter:.4f}, "
-              f"digit={c.digit:.4f}, punct={c.punct:.4f}, space={c.space:.4f})")
+              f"digit={c.digit:.4f}, punct={c.punct:.4f}, space={c.space:.4f}, word={c.word:.4f})")
 
     # ── CSV export ────────────────────────────────────────────────────────────
     if csv_path and rows:
