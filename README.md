@@ -26,7 +26,7 @@ tokens ≈ cjk×F_cjk + letter×F_letter + digit×F_digit + punct×F_punct + spa
 | 系数集 | 拟合方法 | 用途 | MAPE（真实数据）| 保证率（真实数据）|
 |--------|---------|------|----------------|-----------------|
 | `DEFAULT_COEFFS` | NNLS（最小化平方误差） | 最小化误差，允许低估 | 6–12% | 不保证 |
-| `UPPER_COEFFS` | LP（线性规划） | **保证不低估**，最小化高估幅度 | ~45% | **97–99%**（合成数据 100%）|
+| `UPPER_COEFFS` | LP（线性规划） | **保证不低估**，最小化高估幅度 | 33–53% | **97–99%**（合成数据 100%）|
 
 ```python
 # DEFAULT_COEFFS — 4 模型 stacked NNLS，261 条真实语料（Wikipedia + GitHub）
@@ -94,16 +94,16 @@ python fit_custom.py --text your_data.txt --with-synthetic --samples 100
 
 C 扩展直接访问 CPython 内部 Unicode buffer（PEP 393），单次遍历完成全部 6 特征统计，无内存拷贝。
 
-| 实现 | 耗时（160K token） | vs tiktoken |
+| 实现 | 耗时（~160K token） | vs tiktoken |
 |------|-------------------|-------------|
-| HF transformers Kimi（Python 封装） | ~700ms | 0.07× |
-| HF transformers GLM/DSV/MiniMax（Rust 后端） | ~5ms | 9× |
-| tiktoken cl100k_base | 46ms | 1× |
-| NumPy 全特征 `estimate_numpy_full()` | 4.6ms | 10× |
-| Numba JIT（`_bench_numba.py`） | ~3ms | 15× |
-| **C 扩展 `_features.pyd`（默认后端）** | **1.49ms** | **43×** |
+| HF transformers Kimi（Python 封装） | ~735ms | 0.09× |
+| HF transformers GLM/DSV/MiniMax（Rust 后端） | ~250ms | 0.25× |
+| tiktoken cl100k_base | ~60ms | 1× |
+| NumPy 全特征 `estimate_numpy_full()` | ~3.4ms | 18× |
+| Numba JIT（`_bench_numba.py`） | ~1.8ms | 33× |
+| **C 扩展 `_features.pyd`（默认后端）** | **~1.5ms** | **40×** |
 
-> 测试规模：5K / 10K / 20K / 40K / 80K / 160K token，实测 O(n) 线性。
+> 测试规模：5K / 10K / 20K / 40K / 80K / 160K token，实测 O(n) 线性。耗时因文本类型（纯英文/中文/代码）有±30% 波动。
 
 ---
 
