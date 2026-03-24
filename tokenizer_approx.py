@@ -21,22 +21,23 @@ Run benchmark.py --real-data --fit-shared to refit.
 import re
 from typing import NamedTuple
 
-# ── Character-class patterns ──────────────────────────────────────────────────
-# CJK: Unified Ideographs, Extension A/B, Compatibility Ideographs,
-#      CJK Symbols & Punctuation, Halfwidth/Fullwidth Forms
-_CJK_RE = re.compile(
-    "["
-    "\u4e00-\u9fff"          # CJK Unified Ideographs
-    "\u3400-\u4dbf"          # CJK Extension A
-    "\U00020000-\U0002a6df"  # CJK Extension B
-    "\uf900-\ufaff"          # CJK Compatibility Ideographs
-    "\u3000-\u303f"          # CJK Symbols and Punctuation  (。，、！？…)
-    "\uff00-\uffef"          # Halfwidth and Fullwidth Forms (ａｂｃ１２３)
-    "]"
-)
-_LETTER_RE  = re.compile(r"[A-Za-z]")
-_DIGIT_RE   = re.compile(r"[0-9]")
-_SPACE_RE   = re.compile(r"\s")
+# ── C extension (optional fast backend) ───────────────────────────────────────
+# _features.cp312-win_amd64.pyd (or .so on Linux/macOS) — built from _features.c.
+# Provides single-pass char classification directly on CPython's internal buffer;
+# ~43x faster than tiktoken, ~3x faster than numpy at 160K tokens.
+# Falls back to regex if not available (no behavioural difference).
+try:
+    import _features as _C
+    _USE_C = True
+except ImportError:
+    _C = None
+    _USE_C = False
+
+# ── Character-class patterns (regex fallback) ─────────────────────────────────
+_CJK_RE    = re.compile(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")
+_LETTER_RE = re.compile(r"[A-Za-z]")
+_DIGIT_RE  = re.compile(r"[0-9]")
+_SPACE_RE  = re.compile(r"\s")
 
 
 # ── Coefficient container ──────────────────────────────────────────────────────
@@ -51,6 +52,20 @@ class Coeffs(NamedTuple):
 
 DEFAULT_COEFFS = Coeffs()
 
+# Upper-bound coefficients — fitted via LP (scipy linprog/HiGHS) on 2100
+# synthetic samples (21 categories × 100: Chinese, English, code, markdown,
+# JSON, YAML, XML, SQL, numeric, logs, LaTeX…) across all 4 models.
+# Guarantees estimate ≥ real on training corpus; mean overestimate ~44%, max ~194%.
+# Run:  python benchmark.py --samples 100 --fit-upper   to refit.
+UPPER_COEFFS = Coeffs(
+    cjk    = 0.7177,
+    letter = 0.3171,
+    digit  = 1.0067,
+    punct  = 0.5641,
+    space  = 0.0000,
+    word   = 0.9030,
+)
+
 # Backward-compat aliases
 ZH_TPC: float = DEFAULT_COEFFS.cjk
 EN_TPC: float = DEFAULT_COEFFS.letter
@@ -63,21 +78,159 @@ def extract_features(text: str) -> dict[str, int]:
 
     The first five (cjk/letter/digit/punct/space) are mutually exclusive
     char counts that sum to len(text).  'word' is an independent word count.
+    Uses the C extension when available, falls back to regex.
     """
+    if _USE_C:
+        cjk, letter, digit, punct, space, word = _C.extract_features(text)
+        return {"cjk": cjk, "letter": letter, "digit": digit,
+                "punct": punct, "space": space, "word": word}
     cjk    = len(_CJK_RE.findall(text))
     letter = len(_LETTER_RE.findall(text))
     digit  = len(_DIGIT_RE.findall(text))
     space  = len(_SPACE_RE.findall(text))
-    punct  = len(text) - cjk - letter - digit - space
-    word   = len(text.split())
     return {
         "cjk":    cjk,
         "letter": letter,
         "digit":  digit,
-        "punct":  punct,
+        "punct":  len(text) - cjk - letter - digit - space,
         "space":  space,
-        "word":   word,
+        "word":   len(text.split()),
     }
+
+
+def extract_features_fast(text: str) -> tuple[int, int, int, int, int, int]:
+    """
+    Same classification as extract_features() but returns a flat tuple
+    (cjk, letter, digit, punct, space, word).
+    Uses numpy vectorised ops on UTF-32 codepoints — avoids Python loops entirely.
+    """
+    import numpy as np
+    cp = np.frombuffer(text.encode("utf-32-le"), dtype=np.uint32)
+    cjk = int(np.sum(
+        ((cp >= 0x4e00) & (cp <= 0x9fff))
+        | ((cp >= 0x3000) & (cp <= 0x303f))
+        | ((cp >= 0xff00) & (cp <= 0xffef))
+    ))
+    letter = int(np.sum(((cp >= 0x41) & (cp <= 0x5a)) | ((cp >= 0x61) & (cp <= 0x7a))))
+    digit  = int(np.sum((cp >= 0x30) & (cp <= 0x39)))
+    space  = int(np.sum((cp == 0x20) | (cp == 0x09) | (cp == 0x0a) | (cp == 0x0d)))
+    punct  = len(cp) - cjk - letter - digit - space
+    word   = len(text.split())
+    return cjk, letter, digit, punct, space, word
+
+
+def estimate_fast(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
+    """estimate() using numpy-accelerated feature extraction."""
+    if not text:
+        return 0
+    cjk, letter, digit, punct, space, word = extract_features_fast(text)
+    total = (
+        cjk    * coeffs.cjk    +
+        letter * coeffs.letter +
+        digit  * coeffs.digit  +
+        punct  * coeffs.punct  +
+        space  * coeffs.space  +
+        word   * coeffs.word
+    )
+    return max(1, round(total))
+
+
+def estimate_fast_noword(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
+    """estimate_fast without word count — skips text.split()."""
+    if not text:
+        return 0
+    import numpy as np
+    cp = np.frombuffer(text.encode("utf-32-le"), dtype=np.uint32)
+    cjk = int(np.sum(
+        ((cp >= 0x4e00) & (cp <= 0x9fff))
+        | ((cp >= 0x3000) & (cp <= 0x303f))
+        | ((cp >= 0xff00) & (cp <= 0xffef))
+    ))
+    letter = int(np.sum(((cp >= 0x41) & (cp <= 0x5a)) | ((cp >= 0x61) & (cp <= 0x7a))))
+    digit  = int(np.sum((cp >= 0x30) & (cp <= 0x39)))
+    space  = int(np.sum((cp == 0x20) | (cp == 0x09) | (cp == 0x0a) | (cp == 0x0d)))
+    punct  = len(cp) - cjk - letter - digit - space
+    total = (
+        cjk    * coeffs.cjk    +
+        letter * coeffs.letter +
+        digit  * coeffs.digit  +
+        punct  * coeffs.punct  +
+        space  * coeffs.space
+    )
+    return max(1, round(total))
+
+
+def estimate_numpy_full(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
+    """All 6 features via numpy — word count from space→non-space transitions."""
+    if not text:
+        return 0
+    import numpy as np
+    cp = np.frombuffer(text.encode("utf-32-le"), dtype=np.uint32)
+    is_space = (cp == 0x20) | (cp == 0x09) | (cp == 0x0a) | (cp == 0x0d)
+    cjk = int(np.sum(
+        ((cp >= 0x4e00) & (cp <= 0x9fff))
+        | ((cp >= 0x3000) & (cp <= 0x303f))
+        | ((cp >= 0xff00) & (cp <= 0xffef))
+    ))
+    letter = int(np.sum(((cp >= 0x41) & (cp <= 0x5a)) | ((cp >= 0x61) & (cp <= 0x7a))))
+    digit  = int(np.sum((cp >= 0x30) & (cp <= 0x39)))
+    space  = int(np.sum(is_space))
+    punct  = len(cp) - cjk - letter - digit - space
+    # Word count: transitions from space to non-space, plus leading non-space
+    word = int(np.sum(is_space[:-1] & ~is_space[1:])) + (0 if is_space[0] else 1) if len(cp) > 0 else 0
+    total = (
+        cjk    * coeffs.cjk    +
+        letter * coeffs.letter +
+        digit  * coeffs.digit  +
+        punct  * coeffs.punct  +
+        space  * coeffs.space  +
+        word   * coeffs.word
+    )
+    return max(1, round(total))
+
+
+def estimate_ctypes(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
+    """estimate using array module + memoryview — no numpy, no regex."""
+    if not text:
+        return 0
+    import array as _array
+    raw = text.encode("utf-32-le")
+    cp = _array.array("I")
+    cp.frombytes(raw)
+    n = len(cp)
+    # C-level iteration via memoryview is not vectorised,
+    # but avoids Python object creation per character.
+    cjk = letter = digit = space = word = 0
+    mv = memoryview(cp)
+    in_word = False
+    for c in mv:
+        if c <= 0x7f:
+            if 0x41 <= c <= 0x5a or 0x61 <= c <= 0x7a:
+                letter += 1
+                if not in_word: word += 1; in_word = True
+            elif 0x30 <= c <= 0x39:
+                digit += 1
+                if not in_word: word += 1; in_word = True
+            elif c == 0x20 or c == 0x09 or c == 0x0a or c == 0x0d:
+                space += 1
+                in_word = False
+            else:
+                if not in_word: word += 1; in_word = True
+        else:
+            if (0x4e00 <= c <= 0x9fff or 0x3000 <= c <= 0x303f
+                    or 0xff00 <= c <= 0xffef):
+                cjk += 1
+            if not in_word: word += 1; in_word = True
+    punct = n - cjk - letter - digit - space
+    total = (
+        cjk    * coeffs.cjk    +
+        letter * coeffs.letter +
+        digit  * coeffs.digit  +
+        punct  * coeffs.punct  +
+        space  * coeffs.space  +
+        word   * coeffs.word
+    )
+    return max(1, round(total))
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -85,8 +238,8 @@ def estimate(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
     """
     Estimate token count without any tokenizer.
 
-    Uses a 5-feature linear model; see module docstring for details.
-    Pass a custom Coeffs() to use fitted per-model coefficients.
+    Uses the C extension when available (43x faster than tiktoken at 160K tokens),
+    falls back to regex. Pass a custom Coeffs() to use per-model coefficients.
     """
     if not text:
         return 0
@@ -100,6 +253,20 @@ def estimate(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> int:
         f["word"]   * coeffs.word
     )
     return max(1, round(total))
+
+
+def estimate_naive(text: str) -> int:
+    """
+    Naive baseline estimator: ASCII chars / 5, non-ASCII chars / 2.
+
+    No fitting required — useful as a lower-bound on how well a trivial
+    rule-of-thumb performs compared to the fitted linear model.
+    """
+    if not text:
+        return 0
+    ascii_count = sum(1 for c in text if ord(c) < 128)
+    non_ascii_count = len(text) - ascii_count
+    return max(1, round(ascii_count / 5 + non_ascii_count / 2))
 
 
 def estimate_detail(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> dict:

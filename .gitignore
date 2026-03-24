@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
+*.pyd
 .sample_cache/
 .claude/
 package-lock.json
 node_modules/
+build/

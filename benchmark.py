@@ -31,7 +31,7 @@ import numpy as np
 
 from sample_gen import generate_samples, CATEGORIES as SYNTH_CATEGORIES
 from tokenizer_approx import (
-    estimate, extract_features, DEFAULT_COEFFS, Coeffs,
+    estimate, estimate_naive, extract_features, DEFAULT_COEFFS, Coeffs,
 )
 
 ALL_MODELS = ["glm", "dsv", "kimi", "mmax"]
@@ -59,12 +59,13 @@ def _load_counter(name: str):
 
 def _stats(errors, pcts):
     if not errors:
-        return "    N/A      N/A      N/A"
-    n    = len(errors)
-    mae  = sum(abs(e) for e in errors) / n
-    bias = sum(errors) / n
-    mape = sum(abs(p) for p in pcts) / n
-    return f"{mae:>7.2f}  {bias:>+7.2f}  {mape:>7.1f}%"
+        return "    N/A      N/A      N/A      N/A"
+    n       = len(errors)
+    mae     = sum(abs(e) for e in errors) / n
+    bias    = sum(errors) / n
+    mape    = sum(abs(p) for p in pcts) / n
+    max_err = max(abs(p) for p in pcts)
+    return f"{mae:>7.2f}  {bias:>+7.2f}  {mape:>7.1f}%  {max_err:>7.1f}%"
 
 
 # ── Coefficient fitting ───────────────────────────────────────────────────────
@@ -95,6 +96,94 @@ def fit_per_model(samples, counters) -> dict[str, Coeffs]:
         result[name] = Coeffs(cjk=coef[0], letter=coef[1], digit=coef[2],
                               punct=coef[3], space=coef[4], word=coef[5])
     return result
+
+
+def fit_upper_bound(samples, counters) -> Coeffs:
+    """
+    Find the TIGHTEST set of coefficients that guarantees estimate ≥ real
+    for every sample across every available model.
+
+    Formulation (LP):
+        Let bᵢ = max_m(real_{i,m})   (worst-case token count per sample)
+
+        minimise   c · Σᵢ fᵢ         (total predicted tokens — minimize overestimate)
+        subject to fᵢ · c ≥ bᵢ  ∀i  (never underestimate any sample)
+                   c ≥ 0             (non-negative coefficients)
+
+    Solved via scipy.optimize.linprog (HiGHS backend).
+    """
+    from scipy.optimize import linprog
+    A_rows, b_max = [], []
+    for s in samples:
+        f = extract_features(s["text"])
+        row = [f["cjk"], f["letter"], f["digit"], f["punct"], f["space"], f["word"]]
+        reals = [fn(s["text"]) for fn in counters.values()]
+        real_max = max((r for r in reals if r > 0), default=0)
+        if real_max <= 0:
+            continue
+        A_rows.append(row)
+        b_max.append(float(real_max))
+    A = np.array(A_rows, dtype=float)
+    b = np.array(b_max,  dtype=float)
+    feature_sums = A.sum(axis=0)          # objective: minimise c · feature_sums
+    res = linprog(
+        c      = feature_sums,
+        A_ub   = -A,                      # -A·c ≤ -b  ⟺  A·c ≥ b
+        b_ub   = -b,
+        bounds = [(0, None)] * 6,
+        method = "highs",
+    )
+    if res.status != 0:
+        raise RuntimeError(f"LP failed: {res.message}")
+    coef = res.x
+    return Coeffs(cjk=coef[0], letter=coef[1], digit=coef[2],
+                  punct=coef[3], space=coef[4], word=coef[5])
+
+
+def _print_upper_bound_table(label: str, coeffs: Coeffs, samples, counters):
+    """Print upper-bound coefficients with guarantee rate and overestimate stats."""
+    c = coeffs
+    print(f"\n── {label} ──")
+    print(f"  Coeffs(cjk={c.cjk:.4f}, letter={c.letter:.4f}, digit={c.digit:.4f}, "
+          f"punct={c.punct:.4f}, space={c.space:.4f}, word={c.word:.4f})")
+
+    hdr = f"  {'Model':<12}  {'Guarantee':>10}  {'MeanOver%':>10}  {'MaxOver%':>9}  {'MAPE':>7}"
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+
+    all_pcts = []
+    for name, fn in counters.items():
+        pcts, violations = [], 0
+        for s in samples:
+            real = fn(s["text"])
+            if real <= 0:
+                continue
+            app = estimate(s["text"], coeffs=coeffs)
+            pct = (app - real) / real * 100
+            pcts.append(pct)
+            if app < real:
+                violations += 1
+        if not pcts:
+            continue
+        n = len(pcts)
+        guarantee = (n - violations) / n * 100
+        mean_over = sum(p for p in pcts if p > 0) / n
+        max_over  = max(pcts)
+        mape      = sum(abs(p) for p in pcts) / n
+        print(f"  {MODEL_LABELS[name]:<12}  {guarantee:>9.1f}%  {mean_over:>+9.1f}%  "
+              f"{max_over:>+8.1f}%  {mape:>6.1f}%")
+        all_pcts.extend(pcts)
+
+    if all_pcts:
+        n = len(all_pcts)
+        violations = sum(1 for p in all_pcts if p < 0)
+        guarantee  = (n - violations) / n * 100
+        mean_over  = sum(p for p in all_pcts if p > 0) / n
+        max_over   = max(all_pcts)
+        mape       = sum(abs(p) for p in all_pcts) / n
+        print("  " + "-" * (len(hdr) - 2))
+        print(f"  {'ALL MODELS':<12}  {guarantee:>9.1f}%  {mean_over:>+9.1f}%  "
+              f"{max_over:>+8.1f}%  {mape:>6.1f}%")
 
 
 def fit_shared(samples, counters) -> Coeffs:
@@ -196,6 +285,7 @@ def run_benchmark(
     csv_path: str | None = None,
     do_fit: bool = False,
     do_fit_shared: bool = False,
+    do_fit_upper: bool = False,
     display_categories: list[str] | None = None,
 ):
     if active_models is None:
@@ -210,8 +300,10 @@ def run_benchmark(
 
     # ── collect per-sample data ───────────────────────────────────────────────
     rows = []
-    errs  = {m: defaultdict(list) for m in counters}
-    pcts  = {m: defaultdict(list) for m in counters}
+    errs       = {m: defaultdict(list) for m in counters}
+    pcts       = {m: defaultdict(list) for m in counters}
+    naive_errs = {m: defaultdict(list) for m in counters}
+    naive_pcts = {m: defaultdict(list) for m in counters}
     cats_seen: set[str] = set()
 
     n = len(samples)
@@ -220,9 +312,10 @@ def run_benchmark(
         cat  = s["category"]
         cats_seen.add(cat)
         approx = estimate(text)
+        naive  = estimate_naive(text)
         source = s.get("source", "")
         row = {"#": i, "category": cat, "chars": len(text),
-               "approx": approx, "source": source}
+               "approx": approx, "naive": naive, "source": source}
 
         parts = []
         for m, fn in counters.items():
@@ -236,12 +329,22 @@ def run_benchmark(
             pcts[m][cat].append(pct)
             errs[m]["OVERALL"].append(err)
             pcts[m]["OVERALL"].append(pct)
+
+            n_err = naive - real
+            n_pct = n_err / real * 100 if real else 0.0
+            row[f"{m}_naive_err"] = n_err
+            row[f"{m}_naive_pct"] = round(n_pct, 2)
+            naive_errs[m][cat].append(n_err)
+            naive_pcts[m][cat].append(n_pct)
+            naive_errs[m]["OVERALL"].append(n_err)
+            naive_pcts[m]["OVERALL"].append(n_pct)
+
             parts.append(f"{MODEL_LABELS[m]}={real:>5}")
         rows.append(row)
 
         progress = "  ".join(parts)
         src_label = f"  [{source[:40]}]" if source else ""
-        print(f"[{i:>4}/{n}] {cat:<14} chars={len(text):>5}  approx={approx:>5}  "
+        print(f"[{i:>4}/{n}] {cat:<14} chars={len(text):>5}  approx={approx:>5}  naive={naive:>5}  "
               f"{progress}{src_label}")
 
     # ── summary table ─────────────────────────────────────────────────────────
@@ -270,8 +373,32 @@ def run_benchmark(
     print(f"\nDefault coefficients: cjk={c.cjk}  letter={c.letter}  "
           f"digit={c.digit}  punct={c.punct}  space={c.space}")
 
+    # ── naive baseline comparison ─────────────────────────────────────────────
+    print(f"\n── Naive baseline (ASCII/5 + non-ASCII/2) vs linear model ──")
+    naive_hdr = f"  {'Category':<16}  " + "  ".join(
+        f"{MODEL_LABELS[m]} naive-MAE  naive-bias  naive-MAPE" for m in counters
+    )
+    naive_sep_w = len(naive_hdr) - 2
+    print(naive_hdr)
+    print("  " + "-" * naive_sep_w)
+    if display_categories is None:
+        display_cats = sorted(cats_seen)
+    else:
+        display_cats = display_categories
+    for cat in display_cats + ["OVERALL"]:
+        if cat not in cats_seen and cat != "OVERALL":
+            continue
+        if cat == "OVERALL":
+            print("  " + "=" * naive_sep_w)
+        cols = "  ".join(
+            _stats(naive_errs[m].get(cat, []), naive_pcts[m].get(cat, []))
+            for m in counters
+        )
+        print(f"  {cat:<16}  {cols}")
+    print("  " + "=" * naive_sep_w)
+
     # ── fitting ───────────────────────────────────────────────────────────────
-    needs_scipy = do_fit or do_fit_shared
+    needs_scipy = do_fit or do_fit_shared or do_fit_upper
     if needs_scipy:
         try:
             from scipy.optimize import nnls  # noqa
@@ -293,6 +420,17 @@ def run_benchmark(
         c = shared
         print(f"\n  Paste into tokenizer_approx.py DEFAULT_COEFFS:\n"
               f"  DEFAULT_COEFFS = Coeffs(cjk={c.cjk:.4f}, letter={c.letter:.4f}, "
+              f"digit={c.digit:.4f}, punct={c.punct:.4f}, space={c.space:.4f}, word={c.word:.4f})")
+
+    if do_fit_upper:
+        upper = fit_upper_bound(samples, counters)
+        _print_upper_bound_table(
+            "Upper-bound coefficients — LP (guaranteed overestimate, minimal excess)",
+            upper, samples, counters,
+        )
+        c = upper
+        print(f"\n  Paste into tokenizer_approx.py UPPER_COEFFS:\n"
+              f"  UPPER_COEFFS = Coeffs(cjk={c.cjk:.4f}, letter={c.letter:.4f}, "
               f"digit={c.digit:.4f}, punct={c.punct:.4f}, space={c.space:.4f}, word={c.word:.4f})")
 
     # ── CSV export ────────────────────────────────────────────────────────────
@@ -329,6 +467,8 @@ if __name__ == "__main__":
                         help="Fit optimal coefficients separately per model")
     parser.add_argument("--fit-shared", action="store_true",
                         help="Fit ONE shared coefficient set across all models (recommended)")
+    parser.add_argument("--fit-upper", action="store_true",
+                        help="LP: find tightest coefficients guaranteeing overestimate on all samples")
 
     args = parser.parse_args()
 
@@ -344,4 +484,5 @@ if __name__ == "__main__":
         csv_path=args.csv,
         do_fit=args.fit,
         do_fit_shared=args.fit_shared,
+        do_fit_upper=args.fit_upper,
     )

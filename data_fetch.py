@@ -90,6 +90,21 @@ _GITHUB_FILES = [
      "paddlenlp/transformers/tokenizer_utils.py", "mixed"),
     ("PaddlePaddle", "PaddleNLP", "develop",
      "paddlenlp/transformers/auto/tokenization.py", "mixed"),
+    # More Python — numpy, pandas, scikit-learn
+    ("numpy",        "numpy",     "main",   "numpy/core/fromnumeric.py",          "code_py"),
+    ("numpy",        "numpy",     "main",   "numpy/lib/function_base.py",         "code_py"),
+    ("pandas-dev",   "pandas",    "main",   "pandas/core/frame.py",               "code_py"),
+    ("pandas-dev",   "pandas",    "main",   "pandas/core/groupby/groupby.py",     "code_py"),
+    ("scikit-learn", "scikit-learn", "main","sklearn/ensemble/_forest.py",        "code_py"),
+    # C++ — LLVM, protobuf, abseil, OpenCV
+    ("llvm",         "llvm-project", "main", "llvm/lib/Analysis/LoopInfo.cpp",          "code_cpp"),
+    ("llvm",         "llvm-project", "main", "clang/lib/Sema/SemaDecl.cpp",            "code_cpp"),
+    ("protocolbuffers", "protobuf", "main",  "src/google/protobuf/descriptor.cc",       "code_cpp"),
+    ("protocolbuffers", "protobuf", "main",  "src/google/protobuf/descriptor.h",        "code_cpp"),
+    ("abseil",       "abseil-cpp", "master", "absl/container/internal/raw_hash_set.h",  "code_cpp"),
+    ("abseil",       "abseil-cpp", "master", "absl/strings/str_format.h",               "code_cpp"),
+    ("opencv",       "opencv",    "4.x",    "modules/core/src/matrix.cpp",             "code_cpp"),
+    ("opencv",       "opencv",    "4.x",    "modules/imgproc/src/color.cpp",           "code_cpp"),
 ]
 
 

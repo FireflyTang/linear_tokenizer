@@ -4,16 +4,9 @@ Random text sample generator for benchmark purposes.
 Categories:
   pure_chinese   – natural Chinese text (news, technical)
   pure_english   – natural English text (news, technical)
-  mixed          – interleaved Chinese and English
-  code_py        – Python code snippets
-  code_js        – JavaScript / TypeScript snippets
-  code_shell     – Shell / bash commands and scripts
   chat_zh        – Chinese daily conversation (short, colloquial)
   chat_en        – English daily conversation
-  numeric        – numbers, math expressions, punctuation
-  numeric_dense  – pure numeric: IPs, UUIDs, timestamps, hashes
-  markdown       – markdown with headings, lists, code blocks
-  url_code       – URLs, file paths, import statements, identifiers
+  mixed          – interleaved Chinese and English
 """
 
 import random
@@ -124,7 +117,103 @@ _EN_CHAT = [
     "That's a really good point, I hadn't thought of it that way.",
 ]
 
-# ── Code snippets ─────────────────────────────────────────────────────────────
+# ── Public API ────────────────────────────────────────────────────────────────
+
+CATEGORIES = [
+    "pure_chinese",
+    "pure_english",
+    "chat_zh",
+    "chat_en",
+    "mixed",
+    "code_py",
+    "code_js",
+    "code_shell",
+    "code_go",
+    "code_rust",
+    "code_cpp",
+    "code_java",
+    "code_sql",
+    "markdown",
+    "json",
+    "yaml",
+    "xml_html",
+    "numeric",
+    "log_output",
+    "url_code",
+    "latex",
+]
+
+
+def _join_sentences(pool, min_s=1, max_s=3):
+    n = random.randint(min_s, max_s)
+    return "".join(random.choices(pool, k=n))
+
+
+def _join_code(pool, min_s=1, max_s=2):
+    n = random.randint(min_s, max_s)
+    return "\n".join(random.choices(pool, k=n))
+
+
+def generate_samples(n_per_category: int = 20) -> list[dict]:
+    """Return list of dicts: {category, text}."""
+    samples = []
+
+    def add(cat, text):
+        samples.append({"category": cat, "text": text})
+
+    for _ in range(n_per_category):
+        add("pure_chinese", _join_sentences(_ZH_SENTENCES, 1, 3))
+    for _ in range(n_per_category):
+        add("pure_english", _join_sentences(_EN_SENTENCES, 1, 3))
+    for _ in range(n_per_category):
+        add("chat_zh", _join_sentences(_ZH_CHAT, 2, 5))
+    for _ in range(n_per_category):
+        add("chat_en", _join_sentences(_EN_CHAT, 2, 5))
+    for _ in range(n_per_category):
+        parts = []
+        for _ in range(random.randint(2, 4)):
+            if random.random() < 0.5:
+                parts.append(random.choice(_ZH_SENTENCES))
+            else:
+                parts.append(random.choice(_EN_SENTENCES))
+        add("mixed", " ".join(parts))
+    for _ in range(n_per_category):
+        add("code_py",    _join_code(_CODE_PY,    1, 2))
+    for _ in range(n_per_category):
+        add("code_js",    _join_code(_CODE_JS,    1, 2))
+    for _ in range(n_per_category):
+        add("code_shell", _join_code(_CODE_SHELL, 1, 2))
+    for _ in range(n_per_category):
+        add("code_go",    _join_code(_CODE_GO,    1, 2))
+    for _ in range(n_per_category):
+        add("code_rust",  _join_code(_CODE_RUST,  1, 2))
+    for _ in range(n_per_category):
+        add("code_cpp",   _join_code(_CODE_CPP,   1, 2))
+    for _ in range(n_per_category):
+        add("code_java",  _join_code(_CODE_JAVA,  1, 2))
+    for _ in range(n_per_category):
+        add("code_sql",   _join_code(_CODE_SQL,   1, 2))
+    for _ in range(n_per_category):
+        add("markdown",   _join_code(_MARKDOWN,   1, 2))
+    for _ in range(n_per_category):
+        add("json",       _join_code(_JSON_DATA,  1, 1))
+    for _ in range(n_per_category):
+        add("yaml",       _join_code(_YAML_CONFIG, 1, 2))
+    for _ in range(n_per_category):
+        add("xml_html",   _join_code(_XML_HTML,   1, 2))
+    for _ in range(n_per_category):
+        add("numeric",    _join_sentences(_NUMERIC + _NUMERIC_DENSE, 2, 4))
+    for _ in range(n_per_category):
+        add("log_output", _join_code(_LOG_OUTPUT, 1, 2))
+    for _ in range(n_per_category):
+        add("url_code",   _join_sentences(_URL_CODE, 2, 4))
+    for _ in range(n_per_category):
+        add("latex",      _join_code(_LATEX_MATH, 1, 2))
+
+    random.shuffle(samples)
+    return samples
+
+
 _CODE_PY = [
     """import numpy as np
 import pandas as pd
@@ -450,6 +539,628 @@ _NUMERIC_DENSE = [
     "2^32=4294967296 2^64=18446744073709551616 log2(1000000)≈19.93 sqrt(2)≈1.41421356",
 ]
 
+_CODE_GO = [
+    """package main
+
+import (
+\t"context"
+\t"fmt"
+\t"log"
+\t"net/http"
+\t"time"
+)
+
+func main() {
+\tctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+\tdefer cancel()
+\tif err := run(ctx); err != nil {
+\t\tlog.Fatalf("error: %v", err)
+\t}
+}
+""",
+    """func tokenEstimate(text string) int {
+\tvar cjk, letter, digit, space int
+\tfor _, r := range text {
+\t\tswitch {
+\t\tcase r >= 0x4e00 && r <= 0x9fff:
+\t\t\tcjk++
+\t\tcase (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
+\t\t\tletter++
+\t\tcase r >= '0' && r <= '9':
+\t\t\tdigit++
+\t\tcase r == ' ' || r == '\\t' || r == '\\n':
+\t\t\tspace++
+\t\t}
+\t}
+\tpunct := len([]rune(text)) - cjk - letter - digit - space
+\treturn int(float64(cjk)*0.633 + float64(letter)*0.14 + float64(digit)*0.79 +
+\t\tfloat64(punct)*0.71 + float64(space)*0.10)
+}
+""",
+    """type Server struct {
+\taddr    string
+\trouter  *http.ServeMux
+\tclient  *http.Client
+\ttimeout time.Duration
+}
+
+func NewServer(addr string) *Server {
+\treturn &Server{
+\t\taddr:    addr,
+\t\trouter:  http.NewServeMux(),
+\t\tclient:  &http.Client{Timeout: 10 * time.Second},
+\t\ttimeout: 30 * time.Second,
+\t}
+}
+
+func (s *Server) Run(ctx context.Context) error {
+\tsrv := &http.Server{Addr: s.addr, Handler: s.router}
+\tgo func() {
+\t\t<-ctx.Done()
+\t\t_ = srv.Shutdown(context.Background())
+\t}()
+\treturn srv.ListenAndServe()
+}
+""",
+    """func worker(ctx context.Context, jobs <-chan string, results chan<- int, wg *sync.WaitGroup) {
+\tdefer wg.Done()
+\tfor {
+\t\tselect {
+\t\tcase job, ok := <-jobs:
+\t\t\tif !ok {
+\t\t\t\treturn
+\t\t\t}
+\t\t\tresults <- tokenEstimate(job)
+\t\tcase <-ctx.Done():
+\t\t\treturn
+\t\t}
+\t}
+}
+""",
+]
+
+_CODE_RUST = [
+    r"""use std::collections::HashMap;
+
+pub fn extract_features(text: &str) -> HashMap<&'static str, usize> {
+    let mut cjk = 0usize;
+    let mut letter = 0usize;
+    let mut digit = 0usize;
+    let mut space = 0usize;
+    for ch in text.chars() {
+        match ch {
+            '\u{4e00}'..='\u{9fff}' => cjk += 1,
+            'A'..='Z' | 'a'..='z' => letter += 1,
+            '0'..='9' => digit += 1,
+            ' ' | '\t' | '\n' | '\r' => space += 1,
+            _ => {}
+        }
+    }
+    let punct = text.chars().count() - cjk - letter - digit - space;
+    HashMap::from([("cjk", cjk), ("letter", letter), ("digit", digit),
+                   ("punct", punct), ("space", space)])
+}
+""",
+    """#[derive(Debug, Clone)]
+pub struct Coeffs {
+    pub cjk:    f64,
+    pub letter: f64,
+    pub digit:  f64,
+    pub punct:  f64,
+    pub space:  f64,
+    pub word:   f64,
+}
+
+impl Default for Coeffs {
+    fn default() -> Self {
+        Self { cjk: 0.6330, letter: 0.1406, digit: 0.7876,
+               punct: 0.7115, space: 0.0995, word: 0.3633 }
+    }
+}
+
+impl Coeffs {
+    pub fn estimate(&self, text: &str) -> usize {
+        let f = extract_features(text);
+        let words = text.split_whitespace().count();
+        let total = *f.get("cjk").unwrap_or(&0) as f64 * self.cjk
+            + *f.get("letter").unwrap_or(&0) as f64 * self.letter
+            + *f.get("digit").unwrap_or(&0) as f64 * self.digit
+            + *f.get("punct").unwrap_or(&0) as f64 * self.punct
+            + *f.get("space").unwrap_or(&0) as f64 * self.space
+            + words as f64 * self.word;
+        total.round().max(1.0) as usize
+    }
+}
+""",
+    """use anyhow::{Context, Result};
+use tokio::sync::mpsc;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let (tx, mut rx) = mpsc::channel::<String>(100);
+    tokio::spawn(async move {
+        for i in 0..10 {
+            tx.send(format!("message {i}")).await.unwrap();
+        }
+    });
+    while let Some(msg) = rx.recv().await {
+        println!("{msg}");
+    }
+    Ok(())
+}
+""",
+]
+
+_CODE_CPP = [
+    """#include <string>
+#include <unordered_map>
+#include <cstdint>
+
+struct Features {
+    int64_t cjk, letter, digit, punct, space, word;
+};
+
+Features extract_features(const std::u32string& text) {
+    Features f{};
+    bool in_word = false;
+    for (char32_t c : text) {
+        if (c >= 0x4e00 && c <= 0x9fff) { f.cjk++; }
+        else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+            f.letter++;
+            if (!in_word) { f.word++; in_word = true; }
+            continue;
+        } else if (c >= '0' && c <= '9') { f.digit++; }
+        else if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') {
+            f.space++; in_word = false; continue;
+        }
+        if (!in_word) { f.word++; in_word = true; }
+    }
+    f.punct = (int64_t)text.size() - f.cjk - f.letter - f.digit - f.space;
+    return f;
+}
+""",
+    """template<typename T>
+class ThreadSafeQueue {
+    std::queue<T> q_;
+    mutable std::mutex mtx_;
+    std::condition_variable cv_;
+public:
+    void push(T val) {
+        std::lock_guard<std::mutex> lk(mtx_);
+        q_.push(std::move(val));
+        cv_.notify_one();
+    }
+    T pop() {
+        std::unique_lock<std::mutex> lk(mtx_);
+        cv_.wait(lk, [this]{ return !q_.empty(); });
+        T val = std::move(q_.front());
+        q_.pop();
+        return val;
+    }
+};
+""",
+    """#include <pybind11/pybind11.h>
+namespace py = pybind11;
+
+PYBIND11_MODULE(_features, m) {
+    m.doc() = "Fast character-class feature extraction";
+    m.def("extract_features", &extract_features_py,
+          "Single-pass classification on Python unicode string",
+          py::arg("text"));
+}
+""",
+]
+
+_CODE_JAVA = [
+    """import java.util.HashMap;
+import java.util.Map;
+
+public class TokenEstimator {
+    private final double cjk, letter, digit, punct, space, word;
+
+    public TokenEstimator() {
+        this(0.6330, 0.1406, 0.7876, 0.7115, 0.0995, 0.3633);
+    }
+
+    public TokenEstimator(double cjk, double letter, double digit,
+                          double punct, double space, double word) {
+        this.cjk = cjk; this.letter = letter; this.digit = digit;
+        this.punct = punct; this.space = space; this.word = word;
+    }
+
+    public int estimate(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        Map<String, Integer> f = extractFeatures(text);
+        int words = text.trim().isEmpty() ? 0 : text.trim().split("\\\\s+").length;
+        double total = f.get("cjk") * cjk + f.get("letter") * letter
+            + f.get("digit") * digit + f.get("punct") * punct
+            + f.get("space") * space + words * word;
+        return Math.max(1, (int) Math.round(total));
+    }
+}
+""",
+    """@RestController
+@RequestMapping("/api/v1")
+public class TokenController {
+    private final TokenEstimator estimator;
+
+    @PostMapping("/estimate")
+    public ResponseEntity<Map<String, Object>> estimate(@RequestBody Map<String, String> body) {
+        String text = body.getOrDefault("text", "");
+        int count = estimator.estimate(text);
+        return ResponseEntity.ok(Map.of("token_count", count, "chars", text.length()));
+    }
+}
+""",
+    """// Kotlin data class
+data class TokenizerConfig(
+    val modelId: String = "default",
+    val maxTokens: Int = 4096,
+    val temperature: Double = 0.7,
+    val stopSequences: List<String> = emptyList()
+) {
+    fun validate() {
+        require(temperature in 0.0..2.0) { "temperature must be in [0, 2]" }
+        require(maxTokens > 0) { "maxTokens must be positive" }
+    }
+}
+
+fun estimateTokens(text: String, coeffs: Map<String, Double> = defaultCoeffs): Int {
+    val cjk = text.count { it.code in 0x4e00..0x9fff }
+    val letters = text.count { it.isLetter() && it.code < 128 }
+    val digits = text.count { it.isDigit() }
+    val spaces = text.count { it.isWhitespace() }
+    val punct = text.length - cjk - letters - digits - spaces
+    val words = text.trim().split("\\s+".toRegex()).size
+    return maxOf(1, (cjk * 0.633 + letters * 0.14 + digits * 0.79 +
+                     punct * 0.71 + spaces * 0.10 + words * 0.36).roundToInt())
+}
+""",
+]
+
+_CODE_SQL = [
+    """SELECT
+    u.id,
+    u.username,
+    u.email,
+    COUNT(DISTINCT o.id)          AS total_orders,
+    SUM(o.amount)                 AS total_spent,
+    AVG(o.amount)                 AS avg_order_value,
+    MAX(o.created_at)             AS last_order_date,
+    RANK() OVER (ORDER BY SUM(o.amount) DESC) AS spending_rank
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id AND o.status = 'completed'
+WHERE u.created_at >= '2024-01-01'
+  AND u.is_active = TRUE
+GROUP BY u.id, u.username, u.email
+HAVING COUNT(DISTINCT o.id) > 0
+ORDER BY total_spent DESC NULLS LAST
+LIMIT 100;
+""",
+    """CREATE TABLE token_benchmark (
+    id            BIGSERIAL PRIMARY KEY,
+    run_id        UUID NOT NULL DEFAULT gen_random_uuid(),
+    category      VARCHAR(32) NOT NULL,
+    text_hash     CHAR(64) NOT NULL,
+    char_count    INTEGER NOT NULL,
+    model_name    VARCHAR(32) NOT NULL,
+    real_tokens   INTEGER NOT NULL,
+    approx_tokens INTEGER NOT NULL,
+    abs_error     INTEGER GENERATED ALWAYS AS (ABS(approx_tokens - real_tokens)) STORED,
+    pct_error     FLOAT  GENERATED ALWAYS AS (
+        CASE WHEN real_tokens > 0
+             THEN ABS(approx_tokens - real_tokens)::float / real_tokens * 100
+             ELSE NULL END) STORED,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_run_id   ON token_benchmark(run_id);
+CREATE INDEX idx_category ON token_benchmark(category, model_name);
+CREATE INDEX idx_pct_err  ON token_benchmark(pct_error DESC NULLS LAST);
+""",
+    """WITH monthly_stats AS (
+    SELECT
+        DATE_TRUNC('month', created_at) AS month,
+        category,
+        AVG(pct_error)   AS avg_mape,
+        MAX(pct_error)   AS max_error,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY pct_error) AS p95_error,
+        COUNT(*)         AS sample_count
+    FROM token_benchmark
+    WHERE model_name = 'GLM-5'
+    GROUP BY 1, 2
+),
+ranked AS (
+    SELECT *, RANK() OVER (PARTITION BY month ORDER BY avg_mape DESC) AS rank
+    FROM monthly_stats
+)
+SELECT month, category, avg_mape, max_error, p95_error, sample_count
+FROM ranked
+WHERE rank <= 3
+ORDER BY month DESC, rank;
+""",
+    """INSERT INTO token_benchmark (category, text_hash, char_count, model_name, real_tokens, approx_tokens)
+VALUES
+    ('pure_chinese', 'a1b2c3d4', 120, 'GLM-5',    89,  92),
+    ('pure_chinese', 'a1b2c3d4', 120, 'Kimi-K2',  87,  92),
+    ('pure_english', 'e5f6g7h8', 340, 'GLM-5',    78,  75),
+    ('code_py',      'i9j0k1l2', 890, 'DSV-V3.2', 210, 198)
+ON CONFLICT (text_hash, model_name) DO UPDATE
+    SET approx_tokens = EXCLUDED.approx_tokens,
+        created_at    = NOW();
+""",
+]
+
+_JSON_DATA = [
+    """{
+  "model": "claude-sonnet-4-6",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user",   "content": "Estimate the token count for this text."}
+  ],
+  "max_tokens": 1024,
+  "temperature": 0.7,
+  "stop": ["\\n\\n", "Human:"],
+  "stream": false
+}
+""",
+    """{
+  "object": "list",
+  "data": [
+    {
+      "id": "model-001",
+      "object": "model",
+      "created": 1700000000,
+      "owned_by": "openai",
+      "permission": [{"id": "perm-001", "allow_sampling": true, "allow_logprobs": false}]
+    },
+    {
+      "id": "model-002",
+      "object": "model",
+      "created": 1710000000,
+      "owned_by": "anthropic"
+    }
+  ]
+}
+""",
+    """{
+  "benchmark_run": {
+    "id": "run-2026-03-24-001",
+    "timestamp": "2026-03-24T12:00:00Z",
+    "config": {
+      "samples_per_category": 50,
+      "models": ["glm", "dsv", "kimi", "mmax"],
+      "real_data": true
+    },
+    "results": {
+      "overall_mape": 13.5,
+      "per_model": {
+        "glm":  {"mape": 13.5, "mae": 10.73, "bias": +1.58},
+        "dsv":  {"mape": 15.3, "mae": 11.67, "bias": +0.11},
+        "kimi": {"mape": 16.1, "mae": 11.38, "bias": +3.98},
+        "mmax": {"mape": 16.1, "mae": 14.87, "bias": -6.78}
+      }
+    }
+  }
+}
+""",
+    """[
+  {"id": 1, "name": "Alice",   "score": 98.5, "tags": ["ml", "nlp"],      "active": true},
+  {"id": 2, "name": "Bob",     "score": 87.2, "tags": ["cv", "robotics"], "active": false},
+  {"id": 3, "name": "Charlie", "score": 92.1, "tags": ["nlp", "llm"],     "active": true},
+  {"id": 4, "name": "Diana",   "score": 76.8, "tags": ["data", "etl"],    "active": true}
+]
+""",
+    """{
+  "error": {
+    "code": "context_length_exceeded",
+    "message": "This model's maximum context length is 128000 tokens. Your messages resulted in 131072 tokens.",
+    "param": "messages",
+    "type": "invalid_request_error",
+    "details": {
+      "requested": 131072,
+      "limit": 128000,
+      "overflow": 3072
+    }
+  }
+}
+""",
+]
+
+_YAML_CONFIG = [
+    """# Application configuration
+app:
+  name: token-estimator
+  version: 2.0.0
+  environment: production
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  timeout: 30s
+  max_connections: 1000
+
+models:
+  - name: glm
+    id: zai-org/GLM-5
+    vocab_size: 154820
+    enabled: true
+  - name: kimi
+    id: moonshotai/Kimi-K2.5
+    backend: tiktoken
+    enabled: true
+
+logging:
+  level: info
+  format: json
+  output: stdout
+""",
+    """# GitHub Actions workflow
+name: Benchmark CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 2 * * 1'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: python benchmark.py --real-data --fit-upper
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: results.csv
+""",
+    """# Docker Compose
+version: '3.9'
+services:
+  api:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      - GLM_MODEL_ID=zai-org/GLM-5
+      - HF_HOME=/models
+    volumes:
+      - model-cache:/models
+    depends_on: [redis]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+
+volumes:
+  model-cache:
+""",
+]
+
+_XML_HTML = [
+    """<?xml version="1.0" encoding="UTF-8"?>
+<benchmark>
+  <metadata>
+    <version>2.0</version>
+    <date>2026-03-24</date>
+    <models>
+      <model id="glm"  name="GLM-5"        vocab="154820"/>
+      <model id="kimi" name="Kimi-K2.5"    vocab="100000"/>
+    </models>
+  </metadata>
+  <results>
+    <category name="pure_chinese" mape="22.7%" maxerr="52.9%"/>
+    <category name="code_py"      mape="8.1%"  maxerr="20.3%"/>
+    <category name="pure_english" mape="23.6%" maxerr="38.9%"/>
+  </results>
+</benchmark>
+""",
+    """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Token Estimator Demo</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Linear Token Estimator</h1>
+    <textarea id="input" placeholder="Paste your text here..." rows="8"></textarea>
+    <button onclick="estimate()">Estimate Tokens</button>
+    <div id="result" class="result-box">
+      <span id="count">—</span> tokens
+    </div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+""",
+    """<configuration>
+  <appSettings>
+    <add key="ModelEndpoint" value="https://api.example.com/v1"/>
+    <add key="MaxTokens" value="4096"/>
+    <add key="Temperature" value="0.7"/>
+    <add key="RetryAttempts" value="3"/>
+    <add key="TimeoutMs" value="30000"/>
+  </appSettings>
+  <connectionStrings>
+    <add name="DefaultConnection"
+         connectionString="Server=localhost;Database=tokens;Uid=app;Pwd=secret;"
+         providerName="MySql.Data.MySqlClient"/>
+  </connectionStrings>
+</configuration>
+""",
+]
+
+_LATEX_MATH = [
+    r"""The attention mechanism is defined as:
+\[
+\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V
+\]
+where $Q \in \mathbb{R}^{n \times d_k}$, $K \in \mathbb{R}^{m \times d_k}$, and $V \in \mathbb{R}^{m \times d_v}$.
+""",
+    r"""The cross-entropy loss for a classification task is:
+\[
+\mathcal{L} = -\sum_{i=1}^{N} \sum_{c=1}^{C} y_{ic} \log \hat{p}_{ic}
+\]
+where $y_{ic} \in \{0,1\}$ is the ground-truth label and $\hat{p}_{ic} = \text{softmax}(z_i)_c$.
+""",
+    r"""Given a linear program:
+\begin{align}
+\min_{c \geq 0} \quad & \sum_{i} f_i \cdot c \\
+\text{s.t.} \quad & f_i \cdot c \geq b_i \quad \forall i \in [n]
+\end{align}
+the dual problem is $\max_{\lambda \geq 0} \sum_i b_i \lambda_i$ s.t. $\sum_i f_{ij}\lambda_i \leq s_j$.
+""",
+    r"""Bayes' theorem: $P(A \mid B) = \dfrac{P(B \mid A)\,P(A)}{P(B)}$.
+The KL divergence $D_{\mathrm{KL}}(P \| Q) = \mathbb{E}_{x \sim P}\!\left[\log \frac{P(x)}{Q(x)}\right] \geq 0$.
+Fisher information: $\mathcal{I}(\theta) = -\mathbb{E}\!\left[\frac{\partial^2}{\partial\theta^2}\log p(x;\theta)\right]$.
+""",
+]
+
+_LOG_OUTPUT = [
+    """2026-03-24T12:00:01.234Z INFO  [server] Listening on :8080
+2026-03-24T12:00:02.891Z INFO  [tokenizer] Loading GLM-5 vocab (154820 entries)
+2026-03-24T12:00:05.442Z INFO  [tokenizer] GLM-5 ready in 2547ms
+2026-03-24T12:00:05.443Z INFO  [tokenizer] Loading tiktoken cl100k_base
+2026-03-24T12:00:05.521Z INFO  [tokenizer] tiktoken ready in 78ms
+2026-03-24T12:00:05.522Z INFO  [server] All tokenizers initialized
+""",
+    """[2026-03-24 08:15:32] ERROR app.tokenizer - Request timed out after 30000ms
+  request_id=req-7f3a9b2c
+  model=GLM-5
+  text_length=45892
+  elapsed_ms=30001
+  traceback:
+    at Tokenizer.encode (tokenizer.py:142)
+    at BatchProcessor.process (batch.py:89)
+    at Worker.run (worker.py:56)
+[2026-03-24 08:15:32] WARN  app.retry - Retrying request (attempt 2/3)
+[2026-03-24 08:15:35] INFO  app.tokenizer - Request completed in 2847ms
+""",
+    """192.168.1.42 - - [24/Mar/2026:12:05:33 +0000] "POST /api/v1/estimate HTTP/1.1" 200 156 0.003
+192.168.1.43 - - [24/Mar/2026:12:05:34 +0000] "POST /api/v1/estimate HTTP/1.1" 200 164 0.004
+10.0.0.5    - - [24/Mar/2026:12:05:34 +0000] "GET  /healthz            HTTP/1.1" 200  17 0.001
+192.168.1.42 - - [24/Mar/2026:12:05:35 +0000] "POST /api/v1/estimate HTTP/1.1" 422  89 0.002
+""",
+    """BENCHMARK RESULTS 2026-03-24T12:00:00Z
+================================================================================
+Method              5K tok    10K tok   20K tok   40K tok   80K tok  160K tok
+--------------------------------------------------------------------------------
+tiktoken            1.40ms    2.80ms    5.70ms   11.40ms   22.00ms   45.60ms
+numpy_full          0.11ms    0.24ms    0.39ms    0.68ms    1.48ms    4.26ms
+C_extension         0.05ms    0.08ms    0.17ms    0.36ms    0.68ms    1.49ms
+================================================================================
+C_ext vs tiktoken:  28x       35x       34x       32x       32x       31x
+""",
+]
+
 _URL_CODE = [
     "https://huggingface.co/deepseek-ai/DeepSeek-V3/resolve/main/tokenizer.json",
     "from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig",
@@ -468,65 +1179,3 @@ _URL_CODE = [
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-CATEGORIES = [
-    "pure_chinese",
-    "pure_english",
-    "chat_zh",
-    "chat_en",
-    "mixed",
-    "code_py",
-    "code_js",
-    "code_shell",
-    "markdown",
-    "numeric",
-    "numeric_dense",
-    "url_code",
-]
-
-
-def _join_sentences(pool, min_s=1, max_s=3):
-    n = random.randint(min_s, max_s)
-    return "".join(random.choices(pool, k=n))
-
-
-def generate_samples(n_per_category: int = 20) -> list[dict]:
-    """Return list of dicts: {category, text}."""
-    samples = []
-
-    def add(cat, text):
-        samples.append({"category": cat, "text": text})
-
-    for _ in range(n_per_category):
-        add("pure_chinese", _join_sentences(_ZH_SENTENCES, 1, 3))
-    for _ in range(n_per_category):
-        add("pure_english", _join_sentences(_EN_SENTENCES, 1, 3))
-    for _ in range(n_per_category):
-        add("chat_zh", _join_sentences(_ZH_CHAT, 2, 5))
-    for _ in range(n_per_category):
-        add("chat_en", _join_sentences(_EN_CHAT, 2, 5))
-    for _ in range(n_per_category):
-        # mixed: interleave zh and en sentences
-        parts = []
-        for _ in range(random.randint(2, 4)):
-            if random.random() < 0.5:
-                parts.append(random.choice(_ZH_SENTENCES))
-            else:
-                parts.append(random.choice(_EN_SENTENCES))
-        add("mixed", " ".join(parts))
-    for _ in range(n_per_category):
-        add("code_py", random.choice(_CODE_PY) * random.randint(1, 3))
-    for _ in range(n_per_category):
-        add("code_js", random.choice(_CODE_JS) * random.randint(1, 2))
-    for _ in range(n_per_category):
-        add("code_shell", random.choice(_CODE_SHELL) * random.randint(1, 2))
-    for _ in range(n_per_category):
-        add("markdown", random.choice(_MARKDOWN))
-    for _ in range(n_per_category):
-        add("numeric", random.choice(_NUMERIC) * random.randint(1, 3))
-    for _ in range(n_per_category):
-        add("numeric_dense", random.choice(_NUMERIC_DENSE) * random.randint(1, 3))
-    for _ in range(n_per_category):
-        add("url_code", random.choice(_URL_CODE) * random.randint(1, 2))
-
-    random.shuffle(samples)
-    return samples

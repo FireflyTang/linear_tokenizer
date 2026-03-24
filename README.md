@@ -2,104 +2,275 @@
 
 无需加载模型权重的 LLM token 数线性近似估算器，支持 GLM-5 / DeepSeek-V3.2 / Kimi-K2.5 / MiniMax-M2.5。
 
-## 方法
+---
 
-将文本中每个字符归入五个互斥类别，各乘以独立系数后求和：
+## 算法原理
+
+将文本中每个字符归入 5 个互斥类别，加上一个词级特征，各乘独立系数后求和：
 
 ```
-tokens ≈ cjk × F_cjk + letter × F_letter + digit × F_digit + punct × F_punct + space × F_space
+tokens ≈ cjk×F_cjk + letter×F_letter + digit×F_digit + punct×F_punct + space×F_space + word×F_word
 ```
 
-| 特征 | 字符范围 | 默认系数 |
-|------|---------|---------|
-| `cjk` | CJK 汉字、标点、全角字符 | 0.6256 |
-| `letter` | ASCII 字母 `[A-Za-z]` | 0.1828 |
-| `digit` | 数字 `[0-9]` | 1.0820 |
-| `punct` | 标点/符号（其余字符） | 0.8003 |
-| `space` | 空白 `\s` | 0.1184 |
+| 特征 | 字符范围 | 说明 |
+|------|---------|------|
+| `cjk` | U+4E00–U+9FFF, U+3000–U+303F, U+FF00–U+FFEF | 汉字、CJK 标点、全角字符 |
+| `letter` | `[A-Za-z]` | ASCII 字母 |
+| `digit` | `[0-9]` | 数字 |
+| `punct` | 其余字符 | 标点、符号、emoji、西里尔字母等 |
+| `space` | `[ \t\n\r…]` | 空白字符 |
+| `word` | — | 空格切词数（捕捉 BPE 词边界行为） |
 
-系数通过四个模型的真实 tokenizer 在 261 条 Wikipedia + GitHub 语料（每条约 4000 字符）上联合最小二乘拟合得到。
+### 两套系数
 
-## 基准测试结果
-
-### 默认系数（拟合前）
-
-| 模型 | MAPE |
-|------|------|
-| GLM-5 | 28.7% |
-| Kimi-K2.5 | 29.1% |
-| DeepSeek-V3.2 | 25.1% |
-| MiniMax-M2.5 | 16.0% |
-
-### 共用拟合系数（四模型联合 NNLS）
+| 系数集 | 拟合方法 | 用途 | MAPE | 保证率 |
+|--------|---------|------|------|--------|
+| `DEFAULT_COEFFS` | NNLS（最小化平方误差） | 最小化误差，允许低估 | ~7% | 不保证 |
+| `UPPER_COEFFS` | LP（线性规划） | **保证不低估**，最小化高估幅度 | ~44% | **100%** |
 
 ```python
-Coeffs(cjk=0.6256, letter=0.1828, digit=1.0820, punct=0.8003, space=0.1184)
+# DEFAULT_COEFFS — 4 模型 stacked NNLS，261 条真实语料（Wikipedia + GitHub）
+DEFAULT_COEFFS = Coeffs(
+    cjk=0.6330, letter=0.1406, digit=0.7876,
+    punct=0.7115, space=0.0995, word=0.3633,
+)
+
+# UPPER_COEFFS — LP 上界，21 类合成数据 × 100 样本，100% 保证率
+UPPER_COEFFS = Coeffs(
+    cjk=0.7177, letter=0.3171, digit=1.0067,
+    punct=0.5641, space=0.0000, word=0.9030,
+)
 ```
 
-| 模型 | MAPE | 偏差方向 | 偏差比例 |
-|------|------|---------|---------|
-| GLM-5 | 8.0% | 高估 | +4.6% |
-| Kimi-K2.5 | 8.0% | 高估 | +5.0% |
-| DeepSeek-V3.2 | 5.9% | 高估 | +1.3% |
-| MiniMax-M2.5 | 8.5% | 低估 | −6.6% |
-| **平均** | **7.6%** | — | **≈0%** |
+---
 
-### 各模型独立拟合系数
+## 性能
 
-| 模型 | cjk | letter | digit | punct | space | MAPE | 偏差比例 |
-|------|-----|--------|-------|-------|-------|------|---------|
-| GLM-5 | 0.6615 | 0.1840 | 1.2459 | 0.6745 | 0.1185 | 6.6% | +0.87% |
-| Kimi-K2.5 | 0.6485 | 0.1847 | 1.0885 | 0.6958 | 0.1121 | 6.6% | +0.83% |
-| DeepSeek-V3.2 | 0.5761 | 0.1785 | 1.1767 | 0.8226 | 0.1186 | 5.8% | +0.83% |
-| MiniMax-M2.5 | 0.6162 | 0.1838 | 0.8170 | 1.0085 | 0.1244 | 4.9% | +0.45% |
+C 扩展直接访问 CPython 内部 Unicode buffer（PEP 393），单次遍历完成全部 6 特征统计，无内存拷贝。
 
-各自系数下四个模型偏差均压到 1% 以内。
+| 实现 | 耗时（160K token） | vs tiktoken |
+|------|-------------------|-------------|
+| HF transformers Kimi（Python 封装） | ~700ms | 0.07× |
+| HF transformers GLM/DSV/MiniMax（Rust 后端） | ~5ms | 9× |
+| tiktoken cl100k_base | 46ms | 1× |
+| NumPy 全特征 `estimate_numpy_full()` | 4.6ms | 10× |
+| Numba JIT（`_bench_numba.py`） | ~3ms | 15× |
+| **C 扩展 `_features.pyd`（默认后端）** | **1.49ms** | **43×** |
 
-## 安装
+> 测试规模：5K / 10K / 20K / 40K / 80K / 160K token，实测 O(n) 线性。
 
-```bash
-pip install -r requirements.txt
-# 可选（用于 --fit / --fit-shared）
-pip install scipy numpy
-```
+---
 
 ## 快速使用
 
 ```python
+from tokenizer_approx import estimate, UPPER_COEFFS, extract_features
+
+text = "这是一段中英文混合的 sample text，包含代码 x = 42。"
+
+# 默认系数（最小误差，~7% MAPE）
+estimate(text)                        # → int
+
+# 上界系数（100% 保证不低估）
+estimate(text, coeffs=UPPER_COEFFS)   # → int（≥ 任何真实 tokenizer 的结果）
+
+# 底层特征（用于自定义计算）
+extract_features(text)
+# → {"cjk": 12, "letter": 16, "digit": 2, "punct": 3, "space": 8, "word": 7}
+```
+
+### 各模型独立系数（精度更高）
+
+```python
 from tokenizer_approx import estimate, Coeffs
 
-# 共用系数（默认）
-estimate("这是一段中英文混合的 sample text。")
+KIMI_COEFFS = Coeffs(cjk=0.6485, letter=0.1847, digit=1.0885, punct=0.6958, space=0.1121, word=0.0)
+DSV_COEFFS  = Coeffs(cjk=0.5761, letter=0.1785, digit=1.1767, punct=0.8226, space=0.1186, word=0.0)
+GLM_COEFFS  = Coeffs(cjk=0.6615, letter=0.1840, digit=1.2459, punct=0.6745, space=0.1185, word=0.0)
+MMAX_COEFFS = Coeffs(cjk=0.6162, letter=0.1838, digit=0.8170, punct=1.0085, space=0.1244, word=0.0)
 
-# 使用各模型独立系数
-KIMI_COEFFS = Coeffs(cjk=0.6485, letter=0.1847, digit=1.0885, punct=0.6958, space=0.1121)
-estimate("text", coeffs=KIMI_COEFFS)
+estimate(text, coeffs=KIMI_COEFFS)
 ```
 
-## 基准测试
+---
+
+## C 扩展编译（可选，获得最高性能）
+
+不编译也能运行，会自动回退到 NumPy/regex 实现（精度相同，速度稍慢）。
+
+### 一键编译（跨平台）
 
 ```bash
-# 合成短样本（无需下载）
-python benchmark.py --samples 20 --fit-shared
-
-# 真实 k 级别语料（首次运行自动下载并缓存）
-python benchmark.py --real-data --fit-shared
-
-# 各模型分别拟合
-python benchmark.py --real-data --fit
-
-# 指定模型子集
-python benchmark.py --real-data --models kimi,dsv --fit-shared --csv out.csv
+python build.py
 ```
+
+`build.py` 自动检测平台，调用正确的编译器，并在编译后验证结果：
+
+```
+[build] 平台: Windows (AMD64)
+[build] Python: C:\Python312\python.exe  (3.12.0)
+[build] MinGW gcc: C:\msys64\mingw64\bin
+[build] 运行: python setup.py build_ext --inplace --compiler=mingw32
+...
+[build] 验证通过: extract_features('hello 你好 123')
+[build]   → cjk=2, letter=5, digit=3, punct=0, space=2, word=3
+[build] 成功！_features 模块已就绪，estimate() 将自动使用 C 扩展后端。
+```
+
+### 平台依赖
+
+| 平台 | 依赖 | 安装方式 |
+|------|------|---------|
+| Windows | MSYS2 + MinGW-w64 gcc | 安装 [MSYS2](https://www.msys2.org/)，然后 `pacman -S mingw-w64-x86_64-gcc` |
+| Linux | gcc + python3-dev | `sudo apt install build-essential python3-dev` |
+| macOS | Xcode CLT | `xcode-select --install` |
+
+Windows 下 gcc 默认路径为 `C:\msys64\mingw64\bin\gcc.exe`；如安装到其他位置，设置：
+```
+set MINGW_BIN=C:\path\to\mingw64\bin
+python build.py
+```
+
+编译成功后 `estimate()` 自动使用 C 扩展，无需任何代码修改。
+
+---
+
+## 系数训练
+
+### 方法一：合成数据集（无需下载，最快）
+
+21 类合成数据（代码、Markdown、JSON、中英文等），每类 N 个样本：
+
+```bash
+# 拟合 UPPER_COEFFS（LP 上界）
+python benchmark.py --samples 100 --fit-upper
+
+# 拟合 DEFAULT_COEFFS（NNLS）
+python benchmark.py --samples 100 --fit-shared
+
+# 同时拟合两套
+python benchmark.py --samples 100 --fit-upper --fit-shared
+```
+
+### 方法二：真实 Wikipedia + GitHub 语料
+
+首次运行自动下载并缓存到 `.sample_cache/`：
+
+```bash
+python benchmark.py --real-data --fit-upper --fit-shared
+
+# 强制重新下载
+python benchmark.py --real-data --refresh --fit-upper
+```
+
+### 方法三：自定义业务数据（推荐）
+
+将你的业务文本给到 `fit_custom.py`，支持与内置数据集合并训练：
+
+```bash
+# 只用自定义数据
+python fit_custom.py --text mydata.txt
+
+# 自定义 + 合成数据集（获得更广的覆盖）
+python fit_custom.py --text mydata.txt --with-synthetic --samples 50
+
+# 自定义 + Wikipedia/GitHub 真实数据
+python fit_custom.py --text mydata.txt --with-real
+
+# 多个文件
+python fit_custom.py --text file1.txt --text file2.txt --with-synthetic
+```
+
+输出示例：
+
+```
+数据来源汇总:
+  mydata.txt: 143 块  (428,741 字符)
+  合成数据集（21 类×50 样本）: 1050 块
+  ──────────────────────────────────────
+  合计: 1193 块  (3,214,082 字符)
+
+── UPPER_COEFFS 拟合结果（LP，保证不低估）──
+  整体指标（1 个模型 × 1193 块）:
+    保证率:   100.0%  (1193/1193)
+    平均高估: +21.3%
+    最大高估: +78.4%
+    MAPE:     21.3%
+
+  按数据来源细分（模型: kimi_fast）:
+  来源                            块数  保证率   均高估  最大高估   MAPE
+  ──────────────────────────────  ────  ───────  ───────  ────────  ─────
+  自定义/mydata.txt                143  100.0%   +18.2%   +54.1%   18.2%
+  合成/pure_chinese                 50  100.0%   +22.1%   +63.4%   22.1%
+  合成/code_py                      50  100.0%   +31.2%   +77.6%   31.2%
+  ...
+
+══════════════════════════════════════════════════════════════════════
+  # 将以下内容粘贴到 tokenizer_approx.py 以更新系数:
+
+UPPER_COEFFS = Coeffs(
+    cjk    = 0.7251,
+    ...
+)
+```
+
+拟合完成后将输出的 `UPPER_COEFFS` 和 `DEFAULT_COEFFS` 粘贴到 `tokenizer_approx.py` 即可。
+
+---
+
+## 数据集说明
+
+| 数据集 | 文件 | 类别数 | 说明 |
+|--------|------|--------|------|
+| 合成数据 | `sample_gen.py` | 21 类 | 代码（Python/JS/Go/Rust/C++/Java/SQL/Shell）、Markdown、JSON、YAML、XML、LaTeX、中英文、日志等 |
+| 真实数据 | `data_fetch.py` | — | Wikipedia 19 篇（中英文 AI/ML）+ GitHub 35+ 文件（CPython/requests/NumPy/Flask 等） |
+| 自定义数据 | `fit_custom.py --text` | — | 任意 UTF-8 文本文件，自动按行切块 |
+
+---
+
+## 算法历史
+
+详见 [HISTORY.md](HISTORY.md)，记录了 6 个阶段的演进过程、失败案例和数字结果。
+
+| 阶段 | 算法 | 保证率 | MAPE |
+|------|------|--------|------|
+| 0 | Naive（ASCII/5 + 非ASCII/2） | ~55% | ~35% |
+| 1–2 | NNLS 5/6 特征（DEFAULT_COEFFS） | 不保证 | ~7% |
+| 4 | LP 24 类（失败，punct 系数 2.07） | 100% | 70% |
+| 5 | LP 中英文 5 类 | 100% | 23.5% |
+| **6** | **LP 21 类（当前 UPPER_COEFFS）** | **100%** | **43.7%** |
+
+---
 
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `tokenizer_approx.py` | 核心估算模块，`estimate()` / `extract_features()` |
-| `real_tokenizers.py` | 四个真实 tokenizer 的薄封装（懒加载，仅下载词表文件） |
-| `benchmark.py` | 误差评估 + NNLS 系数拟合 |
-| `data_fetch.py` | 从 Wikipedia / GitHub 下载真实语料并缓存 |
-| `sample_gen.py` | 合成测试样本生成器（12 类别） |
-| `results.csv` | 上次基准测试的逐样本结果 |
+| `tokenizer_approx.py` | 核心估算模块：`estimate()` / `extract_features()` / `UPPER_COEFFS` / `DEFAULT_COEFFS` |
+| `_features.c` | C 扩展源码：单次遍历特征统计，访问 CPython 内部 Unicode buffer |
+| `setup.py` | C 扩展编译配置（`python setup.py build_ext --inplace`） |
+| `fit_custom.py` | 自定义数据集接入 + 系数重新拟合 |
+| `benchmark.py` | 误差评估 + NNLS/LP 系数拟合 + 详细报告 |
+| `sample_gen.py` | 21 类合成样本生成器（无需下载） |
+| `data_fetch.py` | Wikipedia + GitHub 真实语料下载与缓存 |
+| `real_tokenizers.py` | 4 个真实 tokenizer 的薄封装（懒加载，仅下载词表） |
+| `bench_perf.py` | 性能测试：5K→160K token 输入，对比 C扩展/NumPy/tiktoken |
+| `build.py` | 跨平台 C 扩展编译脚本（Windows MSYS2 / Linux gcc / macOS CLT） |
+| `_bench_numba.py` | 实验性：Numba JIT vs NumPy vs tiktoken 性能对比 |
+| `HISTORY.md` | 算法演进历史：6 个阶段的实现、数据、结果、结论 |
+| `results.csv` | 上次完整 benchmark 的逐样本结果 |
+
+---
+
+## 安装
+
+```bash
+pip install -r requirements.txt
+# 用于系数拟合（benchmark.py / fit_custom.py）
+pip install scipy numpy
+# 可选：Numba JIT 实验
+pip install numba
+```
+
+`requirements.txt` 包含 transformers / sentencepiece / protobuf（真实 tokenizer 依赖）。
+仅使用 `estimate()` 估算功能时无需安装以上依赖，只需 Python 标准库即可运行（C 扩展可选）。
