@@ -247,7 +247,7 @@ def _print_shared_table(label: str, shared: Coeffs, samples, counters):
     c = shared
     print(f"\n── {label} ──")
     print(f"  Coeffs(cjk={c.cjk:.4f}, letter={c.letter:.4f}, digit={c.digit:.4f}, "
-          f"punct={c.punct:.4f}, space={c.space:.4f})")
+          f"punct={c.punct:.4f}, space={c.space:.4f}, word={c.word:.4f})")
     hdr = f"  {'Model':<12}  {'MAPE':>7}  {'MaxErr':>8}  {'bias%':>7}"
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))

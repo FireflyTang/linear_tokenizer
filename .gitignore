@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 *.pyd
-.sample_cache/
+# .sample_cache/ intentionally tracked — real benchmark data (4.4 MB, 48 files)
 .claude/
 package-lock.json
 node_modules/
