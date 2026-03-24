@@ -65,6 +65,41 @@ UPPER_COEFFS = Coeffs(
     word   = 0.3077,
 )
 
+# Relaxed upper-bound coefficients — LP with 10% underestimate tolerance.
+#
+# Fitting strategy:
+#   LP constraint relaxed from  estimate >= real
+#                           to  estimate >= 0.9 * real
+#   This allows at most 10% underestimate on any individual sample, in exchange
+#   for much lower overestimate on the vast majority of inputs.
+#
+# Result on 1117 real samples (Wikipedia + GitHub, all 4 models):
+#   Guarantee (estimate >= real):  93.0%  (vs 99.9% for UPPER_COEFFS)
+#   Max underestimate:            -10%    (7% of samples, all edge-case patterns)
+#   Mean overestimate:            +11.5%  (vs +23.9% for UPPER_COEFFS)
+#   P90 overestimate:             +23.5%  (vs +37.2% for UPPER_COEFFS)
+#   Samples with >40% overestimate:  7    (vs 71 for UPPER_COEFFS)
+#
+# The 7 remaining >40% outliers are all rare edge-case patterns:
+#   - Wikipedia citation-dense paragraphs ("[1][2][3]..." style)
+#   - Specific library code chunks (cpython dataclasses, Rust hashmap, pandas)
+# These patterns are unlikely in typical business text.
+#
+# Per-category max overestimate:
+#   code_cpp +34%, code_go +23%, code_js +16%, code_rust +40%,
+#   code_shell +17%, mixed +17%, pure_chinese +25%, pure_english +79%(*),
+#   code_py +64%(*)   (* driven by the 7 outlier samples above)
+#
+# Run:  python _refit_filtered.py --tol 10   to refit.
+UPPER_COEFFS_RELAXED = Coeffs(
+    cjk    = 0.6832,
+    letter = 0.1921,
+    digit  = 1.6826,
+    punct  = 1.0374,
+    space  = 0.0882,
+    word   = 0.2770,
+)
+
 # Backward-compat aliases
 ZH_TPC: float = DEFAULT_COEFFS.cjk
 EN_TPC: float = DEFAULT_COEFFS.letter
