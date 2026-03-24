@@ -13,7 +13,7 @@ Plus one word-level feature:
            particularly useful for English prose where word count correlates
            more tightly with token count than letter-char count alone)
 
-Default coefficients are fitted via NNLS on 261 real k-length samples
+Default coefficients are fitted via NNLS on 1117 real samples
 (Wikipedia + GitHub) across GLM-5, Kimi-K2.5, DeepSeek-V3.2, MiniMax-M2.5.
 Run benchmark.py --real-data --fit-shared to refit.
 """
@@ -43,27 +43,26 @@ _SPACE_RE  = re.compile(r"\s")
 # ── Coefficient container ──────────────────────────────────────────────────────
 class Coeffs(NamedTuple):
     """Tokens-per-unit for each feature. char features: tokens/char; word: tokens/word."""
-    cjk:    float = 0.6330   # CJK chars
-    letter: float = 0.1406   # ASCII letter chars
-    digit:  float = 0.7876   # digit chars
-    punct:  float = 0.7115   # other chars (punct/symbols)
-    space:  float = 0.0995   # whitespace chars
-    word:   float = 0.3633   # whitespace-split words
+    cjk:    float = 0.6223   # CJK chars
+    letter: float = 0.1766   # ASCII letter chars
+    digit:  float = 1.1655   # digit chars
+    punct:  float = 0.7246   # other chars (punct/symbols)
+    space:  float = 0.0971   # whitespace chars
+    word:   float = 0.1947   # whitespace-split words
 
 DEFAULT_COEFFS = Coeffs()
 
-# Upper-bound coefficients — fitted via LP (scipy linprog/HiGHS) on 2100
-# synthetic samples (21 categories × 100: Chinese, English, code, markdown,
-# JSON, YAML, XML, SQL, numeric, logs, LaTeX…) across all 4 models.
-# Guarantees estimate ≥ real on training corpus; mean overestimate ~44%, max ~194%.
-# Run:  python benchmark.py --samples 100 --fit-upper   to refit.
+# Upper-bound coefficients — fitted via LP (scipy linprog/HiGHS) on 1117 real
+# samples (Wikipedia + GitHub) across all 4 models.
+# Guarantees estimate ≥ real on training corpus; mean overestimate ~37%, max ~112%.
+# Run:  python benchmark.py --real-data --fit-upper   to refit.
 UPPER_COEFFS = Coeffs(
-    cjk    = 0.7177,
-    letter = 0.3171,
-    digit  = 1.0067,
-    punct  = 0.5641,
-    space  = 0.0000,
-    word   = 0.9030,
+    cjk    = 0.7591,
+    letter = 0.2135,
+    digit  = 1.8696,
+    punct  = 1.1526,
+    space  = 0.0980,
+    word   = 0.3077,
 )
 
 # Backward-compat aliases
