@@ -32,6 +32,7 @@ import numpy as np
 from sample_gen import generate_samples, CATEGORIES as SYNTH_CATEGORIES
 from tokenizer_approx import (
     estimate, estimate_naive, extract_features, DEFAULT_COEFFS, Coeffs,
+    extract_features7, estimate7, Coeffs7,
 )
 
 ALL_MODELS = ["glm", "dsv", "kimi", "mmax"]
@@ -138,6 +139,74 @@ def fit_upper_bound(samples, counters) -> Coeffs:
     coef = res.x
     return Coeffs(cjk=coef[0], letter=coef[1], digit=coef[2],
                   punct=coef[3], space=coef[4], word=coef[5])
+
+
+def _build_matrix7(samples, counter_fn):
+    """Return (A, b) design matrix for one model — 7 features."""
+    A_rows, b_rows = [], []
+    for s in samples:
+        f = extract_features7(s["text"])
+        real = counter_fn(s["text"])
+        if real <= 0:
+            continue
+        A_rows.append([f["cjk"], f["letter"], f["digit_iso"], f["digit_run"],
+                        f["punct"], f["space"], f["word"]])
+        b_rows.append(real)
+    return np.array(A_rows, dtype=float), np.array(b_rows, dtype=float)
+
+
+def fit_upper_bound7(samples, counters) -> Coeffs7:
+    """
+    Find the TIGHTEST 7-feature coefficients that guarantee estimate >= real
+    for every sample across every available model.
+
+    Formulation (LP): same as fit_upper_bound but with 7 features
+    (digit split into digit_iso and digit_run).
+    """
+    from scipy.optimize import linprog
+    A_rows, b_max = [], []
+    for s in samples:
+        f = extract_features7(s["text"])
+        row = [f["cjk"], f["letter"], f["digit_iso"], f["digit_run"],
+               f["punct"], f["space"], f["word"]]
+        reals = [fn(s["text"]) for fn in counters.values()]
+        real_max = max((r for r in reals if r > 0), default=0)
+        if real_max <= 0:
+            continue
+        A_rows.append(row)
+        b_max.append(float(real_max))
+    A = np.array(A_rows, dtype=float)
+    b = np.array(b_max,  dtype=float)
+    feature_sums = A.sum(axis=0)
+    res = linprog(
+        c      = feature_sums,
+        A_ub   = -A,
+        b_ub   = -b,
+        bounds = [(0, None)] * 7,
+        method = "highs",
+    )
+    if res.status != 0:
+        raise RuntimeError(f"LP failed: {res.message}")
+    coef = res.x
+    return Coeffs7(cjk=coef[0], letter=coef[1], digit_iso=coef[2], digit_run=coef[3],
+                   punct=coef[4], space=coef[5], word=coef[6])
+
+
+def fit_shared7(samples, counters) -> Coeffs7:
+    """
+    Fit ONE shared 7-feature coefficient set across all available models via NNLS.
+    """
+    from scipy.optimize import nnls
+    A_all, b_all = [], []
+    for fn in counters.values():
+        A, b = _build_matrix7(samples, fn)
+        A_all.append(A)
+        b_all.append(b)
+    A_stacked = np.vstack(A_all)
+    b_stacked  = np.concatenate(b_all)
+    coef, _ = nnls(A_stacked, b_stacked)
+    return Coeffs7(cjk=coef[0], letter=coef[1], digit_iso=coef[2], digit_run=coef[3],
+                   punct=coef[4], space=coef[5], word=coef[6])
 
 
 def _print_upper_bound_table(label: str, coeffs: Coeffs, samples, counters):

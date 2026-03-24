@@ -70,6 +70,42 @@ ZH_TPC: float = DEFAULT_COEFFS.cjk
 EN_TPC: float = DEFAULT_COEFFS.letter
 
 
+# ── 7-feature coefficient container ───────────────────────────────────────────
+class Coeffs7(NamedTuple):
+    """7-feature variant: digit split into digit_iso (isolated) and digit_run (runs 2+)."""
+    cjk:       float = 0.0   # CJK chars
+    letter:    float = 0.0   # ASCII letter chars
+    digit_iso: float = 0.0   # isolated digit chars (neighbours are non-digit)
+    digit_run: float = 0.0   # digit chars in runs of 2+ consecutive digits
+    punct:     float = 0.0   # other chars (punct/symbols)
+    space:     float = 0.0   # whitespace chars
+    word:      float = 0.0   # whitespace-split words
+
+# Upper-bound coefficients — fitted via LP on 1117 real samples (same corpus as
+# UPPER_COEFFS). Guarantees estimate >= real; max overestimate ~102% vs ~112% for
+# the 6-feature model. Run _fit7.py to refit.
+UPPER_COEFFS7 = Coeffs7(
+    cjk       = 0.7869,
+    letter    = 0.2052,
+    digit_iso = 2.5475,
+    digit_run = 0.8148,
+    punct     = 1.0791,
+    space     = 0.0976,
+    word      = 0.4461,
+)
+
+# Default coefficients — fitted via NNLS on same corpus. Run _fit7.py to refit.
+DEFAULT_COEFFS7 = Coeffs7(
+    cjk       = 0.6286,
+    letter    = 0.1929,
+    digit_iso = 2.1975,
+    digit_run = 0.7170,
+    punct     = 0.6911,
+    space     = 0.0912,
+    word      = 0.1308,
+)
+
+
 # ── Feature extraction ────────────────────────────────────────────────────────
 def extract_features(text: str) -> dict[str, int]:
     """
@@ -300,3 +336,64 @@ def estimate_detail(text: str, coeffs: Coeffs = DEFAULT_COEFFS) -> dict:
         "space_tokens":  space_t,
         "word_tokens":   word_t,
     }
+
+
+# ── 7-feature extraction ───────────────────────────────────────────────────────
+
+def extract_features7(text: str) -> dict[str, int]:
+    """
+    Return a dict with seven features.
+
+    Same as extract_features() but the 'digit' feature is split into:
+      digit_iso: digit chars where BOTH adjacent chars are non-digit (or boundary)
+      digit_run: digit chars that are part of a run of 2+ consecutive digits
+
+    The C extension gives only 6 features; extract_features7 applies the
+    digit split on top of extract_features() output using a simple scan.
+    """
+    # Get base 6-feature dict (uses C ext if available)
+    base = extract_features(text)
+
+    # Count digit_iso via a simple character scan
+    digit_iso = 0
+    n = len(text)
+    for i, ch in enumerate(text):
+        if ch.isdigit():
+            prev_is_digit = (i > 0 and text[i - 1].isdigit())
+            next_is_digit = (i + 1 < n and text[i + 1].isdigit())
+            if not prev_is_digit and not next_is_digit:
+                digit_iso += 1
+
+    digit_run = base["digit"] - digit_iso
+    return {
+        "cjk":       base["cjk"],
+        "letter":    base["letter"],
+        "digit_iso": digit_iso,
+        "digit_run": digit_run,
+        "punct":     base["punct"],
+        "space":     base["space"],
+        "word":      base["word"],
+    }
+
+
+def estimate7(text: str, coeffs: Coeffs7 = None) -> int:
+    """
+    Estimate token count using the 7-feature model.
+
+    If coeffs is None, falls back to DEFAULT_COEFFS7.
+    """
+    if not text:
+        return 0
+    if coeffs is None:
+        coeffs = DEFAULT_COEFFS7
+    f = extract_features7(text)
+    total = (
+        f["cjk"]       * coeffs.cjk       +
+        f["letter"]    * coeffs.letter     +
+        f["digit_iso"] * coeffs.digit_iso  +
+        f["digit_run"] * coeffs.digit_run  +
+        f["punct"]     * coeffs.punct      +
+        f["space"]     * coeffs.space      +
+        f["word"]      * coeffs.word
+    )
+    return max(1, round(total))
