@@ -14,14 +14,12 @@ Default proxy applied: http://127.0.0.1:7897
 
 Fast Kimi counter
 -----------------
-Kimi-K2.5's tokenizer wraps OpenAI's tiktoken cl100k_base internally
-(see tokenization_kimi.py in the HF repo). kimi_count_fast() uses tiktoken
-directly — no HF download, loads in <100ms, produces identical token counts.
+kimi_count_fast() uses tiktoken cl100k_base as a fast approximation.
+Kimi-K2.5's tokenizer is based on cl100k_base but diverges in practice —
+particularly for CJK text, empirical benchmarks show per-sample differences.
 
-    pip install tiktoken   # ~2 MB, no model weights
-
-kimi_count() is the canonical reference (AutoTokenizer); kimi_count_fast()
-is the drop-in replacement for production use.
+kimi_count() is the canonical reference (AutoTokenizer).
+kimi_count_fast() is a speedup for non-accuracy-critical use only.
 """
 
 import os
