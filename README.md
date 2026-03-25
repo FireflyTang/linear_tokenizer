@@ -43,18 +43,46 @@ from tokenizer_approx import estimate, UPPER_COEFFS, UPPER_COEFFS_RELAXED, extra
 text = "这是一段中英文混合的 sample text，包含代码 x = 42。"
 
 # 默认：最小化误差，约 7% MAPE，允许低估
-estimate(text)
+estimate(text)                              # → 17
 
 # 宽松上界（推荐）：93% 保证不低估，均高估约 +12%，最大低估 10%
-estimate(text, coeffs=UPPER_COEFFS_RELAXED)
+estimate(text, coeffs=UPPER_COEFFS_RELAXED) # → 20
 
 # 严格上界：99.9% 保证不低估，均高估约 +24%
-estimate(text, coeffs=UPPER_COEFFS)
+estimate(text, coeffs=UPPER_COEFFS)         # → 22
 
 # 底层特征
 extract_features(text)
-# → {"cjk": 12, "letter": 16, "digit": 2, "punct": 3, "space": 8, "word": 7}
+# → {"cjk": 16, "letter": 11, "digit": 2, "punct": 1, "space": 5, "word": 6}
 ```
+
+### NumPy 后端（批量处理）
+
+`estimate_numpy_full` / `extract_features_fast` 内部用 NumPy 完成字符分类，适合在已有 NumPy 环境中批量处理：
+
+```python
+from tokenizer_approx import estimate_numpy_full, extract_features_fast, UPPER_COEFFS_RELAXED
+
+texts = [
+    "深度学习模型在自然语言处理领域取得了显著成果。",
+    "The transformer architecture revolutionized NLP tasks.",
+    "def tokenize(text): return text.split()",
+]
+
+# 特征提取：返回 tuple (cjk, letter, digit, punct, space, word)
+for t in texts:
+    print(extract_features_fast(t))
+# → (23, 0, 0, 0, 0, 1)
+# → (0, 48, 0, 1, 5, 6)
+# → (0, 30, 0, 6, 3, 4)
+
+# 批量估算
+results = [estimate_numpy_full(t, coeffs=UPPER_COEFFS_RELAXED) for t in texts]
+print(results)  # → [16, 12, 13]
+```
+
+> `estimate_numpy_full` 与 `estimate` 结果相同，区别仅在后端实现。
+> C 扩展（`_features.pyd`）编译后会自动作为默认后端，性能更高（见[性能](#性能)）。
 
 ---
 
